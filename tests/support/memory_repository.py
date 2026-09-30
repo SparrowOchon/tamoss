@@ -708,6 +708,25 @@ class FakeTamossRepository:
         matching.sort(key=segment_domain.segment_sort_key)
         return matching
 
+    def list_segment_gaps(
+        self,
+        *,
+        flow_id: UUID,
+        timerange_start: int,
+        timerange_end: int,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        overlapping = self.list_segments_overlapping(
+            flow_id=flow_id,
+            timeranges=[SegmentTimerangeBounds(timerange_start, timerange_end)],
+        )
+        gaps = segment_domain.missing_timerange_bounds(
+            map(segment_domain.segment_bounds, overlapping),
+            start=timerange_start,
+            end=timerange_end,
+        )
+        return gaps[:limit]
+
     def list_segments_page(
         self,
         *,

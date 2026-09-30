@@ -4626,6 +4626,55 @@ webhooks:
       responses:
         '200':
           description: Webhook received successfully
+  flows/segments_requested:
+    x-tamoss-extension: true
+    post:
+      security:
+      - {}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              title: Flow Segments Requested
+              description: TAMOSS extension. Notification that a client listed Flow
+                Segments for a timerange that is not fully indexed, listing every
+                unindexed span.
+              required:
+              - event_timestamp
+              - event_type
+              - event
+              properties:
+                event_timestamp:
+                  description: Timestamp at which the Segment listing was served
+                  type: string
+                  format: date-time
+                event_type:
+                  type: string
+                  const: flows/segments_requested
+                event:
+                  type: object
+                  required:
+                  - flow_id
+                  - timerange
+                  - missing_timeranges
+                  - truncated
+                  properties:
+                    flow_id:
+                      $ref: '#/components/schemas/Uuid'
+                    timerange:
+                      $ref: '#/components/schemas/Timerange'
+                    missing_timeranges:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Timerange'
+                    truncated:
+                      description: True when more Segments overlapped the request
+                        than were scanned, so spans after the last listed one are
+                        unknown
+                      type: boolean
+      responses:
+        '200':
+          description: Webhook received successfully
 components:
   responses:
     trait_resource_listing_head_200:
@@ -5507,6 +5556,9 @@ components:
             - sources/created
             - sources/updated
             - sources/deleted
+            - flows/segments_requested
+            x-tamoss-extension-events:
+            - flows/segments_requested
         flow_ids:
           description: Limit Flow and Flow Segment events to Flows in the given list
             of Flow IDs

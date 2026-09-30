@@ -55,6 +55,16 @@ def finite_normalized_timerange_bounds(
     return bounds
 
 
+def timerange_from_bounds(start: int | None, end: int | None) -> str:
+    if start is None or end is None:
+        return "()"
+    start_ts = Timestamp.from_nanosec(start)
+    end_ts = Timestamp.from_nanosec(end)
+    if start == end:
+        return f"[{start_ts}]"
+    return f"[{start_ts}_{end_ts})"
+
+
 def parse_timerange(
     value: Any, *, field_name: str = "timerange", finite: bool = False
 ) -> TimeRange:

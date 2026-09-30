@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -92,6 +93,24 @@ def timerange_query_end(
 
 def timerange_union(segments: list[SegmentRecord]) -> str:
     return timerange_union_strings(segment.timerange for segment in segments) or "()"
+
+
+def missing_timerange_bounds(
+    bounds: Iterable[tuple[int, int]], *, start: int, end: int
+) -> list[tuple[int, int]]:
+    gaps: list[tuple[int, int]] = []
+    cursor = start
+    for segment_start, segment_end in sorted(bounds):
+        clipped_start = max(segment_start, start)
+        clipped_end = min(segment_end, end)
+        if clipped_end <= clipped_start:
+            continue
+        if clipped_start > cursor:
+            gaps.append((cursor, clipped_start))
+        cursor = max(cursor, clipped_end)
+    if cursor < end:
+        gaps.append((cursor, end))
+    return gaps
 
 
 def segment_delete_filter(

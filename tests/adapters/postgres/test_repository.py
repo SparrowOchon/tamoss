@@ -442,6 +442,29 @@ def test_repository_lists_segments_with_database_paging_and_filters(
     assert filtered_page.next_page is None
     assert filtered_page.timerange == "[20:0_30:0)"
 
+    gaps = postgres_repo.segment_repository.list_segment_gaps(
+        flow_id=flow_id,
+        timerange_start=-5_000_000_000,
+        timerange_end=35_000_000_000,
+        limit=10,
+    )
+    assert gaps == [(-5_000_000_000, 0), (30_000_000_000, 35_000_000_000)]
+    assert (
+        postgres_repo.segment_repository.list_segment_gaps(
+            flow_id=flow_id,
+            timerange_start=5_000_000_000,
+            timerange_end=25_000_000_000,
+            limit=10,
+        )
+        == []
+    )
+    assert postgres_repo.segment_repository.list_segment_gaps(
+        flow_id=uuid4(),
+        timerange_start=0,
+        timerange_end=10_000_000_000,
+        limit=10,
+    ) == [(0, 10_000_000_000)]
+
 
 def test_repository_lists_flows_page_with_sql_filters_and_relationships(
     postgres_repo: PostgresRepository,

@@ -250,6 +250,15 @@ class SegmentRepository(TransactionalRepository, StorageBackendRepository, Proto
         timeranges: Iterable[SegmentTimerangeBounds],
     ) -> list[SegmentRecord]: ...
 
+    def list_segment_gaps(
+        self,
+        *,
+        flow_id: UUID,
+        timerange_start: int,
+        timerange_end: int,
+        limit: int,
+    ) -> list[tuple[int, int]]: ...
+
     def save_registered_segments(
         self,
         *,

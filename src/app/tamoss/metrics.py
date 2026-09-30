@@ -67,6 +67,10 @@ PRESIGNED_URLS_GENERATED_TOTAL = Counter(
     "Presigned object-store URLs generated.",
     ("operation",),
 )
+SEGMENT_REQUEST_EVENTS_TOTAL = Counter(
+    "tamoss_segment_request_events_total",
+    "Flow Segment listings over unindexed timeranges that queued a webhook event.",
+)
 
 
 def record_segments_ingested(count: int) -> None:
@@ -85,6 +89,10 @@ def observe_segment_ingest_batch(size: int) -> None:
 
 def record_presigned_url(operation: str) -> None:
     PRESIGNED_URLS_GENERATED_TOTAL.labels(operation=operation).inc()
+
+
+def record_segment_request_event() -> None:
+    SEGMENT_REQUEST_EVENTS_TOTAL.inc()
 
 
 # Worker media-load metrics: the background worker is a separate process that

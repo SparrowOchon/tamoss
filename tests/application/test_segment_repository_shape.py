@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 from tamoss.app import create_app
 from tamoss.application.use_cases import TamossUseCases
 from tamoss.domain.model import (
@@ -16,10 +17,17 @@ from tamoss.domain.model import (
     SourceRecord,
     SourceRelationships,
     StorageBackend,
+    WebhookDeliveryRecord,
     WebhookRecord,
 )
 from tamoss.domain.pagination import Page
-from tamoss.domain.segments import SegmentTimerangeBounds, timerange_union
+from tamoss.domain.segments import (
+    SegmentTimerangeBounds,
+    missing_timerange_bounds,
+    segment_bounds,
+    segment_overlaps_bounds,
+    timerange_union,
+)
 from tamoss.settings import Settings, StorageBackendSettings
 
 from tests.support.object_storage import InMemoryObjectStorage
@@ -282,12 +290,107 @@ def test_flow_listing_reuses_loaded_records_for_timeranges() -> None:
     assert len(repository.flow_timeranges_requests) == 1
 
 
+def test_bounded_listing_without_subscribers_adds_only_the_webhook_lookup() -> None:
+    repository = CountingRepository(_storage_backend())
+    flow_id = _indexed_flow(repository, segment_count=3)
+    repository.reset_counts()
+
+    with TestClient(
+        create_app(_settings(), use_cases=_use_cases(repository))
+    ) as client:
+        for timerange in ("[0:0_3:0)", "[0:0_5:0)"):
+            response = client.get(
+                f"/flows/{flow_id}/segments", params={"timerange": timerange}
+            )
+            assert response.status_code == 200
+
+    assert repository.list_segments_page_calls == 2
+    assert repository.get_objects_calls == 2
+    assert repository.list_webhooks_calls == 2
+    assert repository.list_segment_gaps_calls == 0
+    assert repository.save_webhook_delivery_calls == 0
+
+
+def test_subscribed_covered_listing_runs_one_gap_query_and_publishes_nothing() -> None:
+    repository = CountingRepository(_storage_backend())
+    flow_id = _indexed_flow(repository, segment_count=3)
+    repository.save_webhook(_segment_request_webhook())
+    repository.reset_counts()
+
+    with TestClient(
+        create_app(_settings(), use_cases=_use_cases(repository))
+    ) as client:
+        response = client.get(
+            f"/flows/{flow_id}/segments", params={"timerange": "[0:0_3:0)"}
+        )
+
+    assert response.status_code == 200
+    assert repository.list_webhooks_calls == 1
+    assert repository.list_segment_gaps_calls == 1
+    assert repository.list_flows_collecting_calls == 0
+    assert repository.save_webhook_delivery_calls == 0
+
+
+def test_subscribed_uncovered_listing_runs_one_gap_query_and_publishes_once() -> None:
+    repository = CountingRepository(_storage_backend())
+    flow_id = _indexed_flow(repository, segment_count=3)
+    repository.save_webhook(_segment_request_webhook())
+    repository.reset_counts()
+
+    with TestClient(
+        create_app(_settings(), use_cases=_use_cases(repository))
+    ) as client:
+        response = client.get(
+            f"/flows/{flow_id}/segments", params={"timerange": "[0:0_5:0)"}
+        )
+
+    assert response.status_code == 200
+    assert repository.list_segments_page_calls == 1
+    assert repository.list_webhooks_calls == 2
+    assert repository.list_segment_gaps_calls == 1
+    assert repository.list_flows_collecting_calls == 1
+    assert repository.save_webhook_delivery_calls == 1
+    assert [
+        delivery.payload["event"] for delivery in repository.webhook_deliveries
+    ] == [
+        {
+            "flow_id": str(flow_id),
+            "timerange": "[0:0_5:0)",
+            "missing_timeranges": ["[3:0_5:0)"],
+            "truncated": False,
+        }
+    ]
+
+
+def test_subscriber_scoped_to_another_flow_skips_the_gap_query_and_the_metric() -> None:
+    repository = CountingRepository(_storage_backend())
+    flow_id = _indexed_flow(repository, segment_count=3)
+    repository.save_webhook(_segment_request_webhook(flow_ids=[str(uuid4())]))
+    repository.reset_counts()
+    before = REGISTRY.get_sample_value("tamoss_segment_request_events_total") or 0.0
+
+    with TestClient(
+        create_app(_settings(), use_cases=_use_cases(repository))
+    ) as client:
+        response = client.get(
+            f"/flows/{flow_id}/segments", params={"timerange": "[0:0_5:0)"}
+        )
+
+    assert response.status_code == 200
+    assert repository.list_webhooks_calls == 1
+    assert repository.list_segment_gaps_calls == 0
+    assert repository.save_webhook_delivery_calls == 0
+    assert REGISTRY.get_sample_value("tamoss_segment_request_events_total") == before
+
+
 class CountingRepository:
     def __init__(self, storage_backend: StorageBackend):
         self._storage_backend = storage_backend
         self._flows: dict[UUID, FlowRecord] = {}
         self._objects: dict[str, MediaObjectRecord] = {}
         self._segments: dict[UUID, list[SegmentRecord]] = {}
+        self._webhooks: dict[UUID, WebhookRecord] = {}
+        self.webhook_deliveries: list[WebhookDeliveryRecord] = []
         self.reset_counts()
 
     def reset_counts(self) -> None:
@@ -300,6 +403,10 @@ class CountingRepository:
         self.list_segments_calls = 0
         self.list_segments_page_calls = 0
         self.list_segments_overlapping_calls = 0
+        self.list_segment_gaps_calls = 0
+        self.list_webhooks_calls = 0
+        self.list_flows_collecting_calls = 0
+        self.save_webhook_delivery_calls = 0
         self.append_segment_calls = 0
         self.save_registered_segments_calls = 0
         self.lock_flow_segments_calls = 0
@@ -360,6 +467,18 @@ class CountingRepository:
         return None
 
     def list_webhooks(self) -> list[WebhookRecord]:
+        self.list_webhooks_calls += 1
+        return list(self._webhooks.values())
+
+    def save_webhook(self, webhook: WebhookRecord) -> None:
+        self._webhooks[webhook.id] = webhook
+
+    def save_webhook_delivery(self, delivery: WebhookDeliveryRecord) -> None:
+        self.save_webhook_delivery_calls += 1
+        self.webhook_deliveries.append(delivery)
+
+    def list_flows_collecting(self, flow_ids: Iterable[UUID]) -> list[FlowRecord]:
+        self.list_flows_collecting_calls += 1
         return []
 
     def list_webhooks_page(self, **kwargs) -> Page[WebhookRecord]:
@@ -451,6 +570,29 @@ class CountingRepository:
             segments = segments[:limit]
         return Page(items=segments, limit=limit, next_page=None, timerange="[0:0_1:0)")
 
+    def list_segment_gaps(
+        self,
+        *,
+        flow_id: UUID,
+        timerange_start: int,
+        timerange_end: int,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        self.list_segment_gaps_calls += 1
+        bounds = [
+            segment_bounds(segment)
+            for segment in self._segments.get(flow_id, [])
+            if segment_overlaps_bounds(
+                segment,
+                start=timerange_start,
+                end=timerange_end,
+                requested_is_point=False,
+            )
+        ]
+        return missing_timerange_bounds(
+            bounds, start=timerange_start, end=timerange_end
+        )[:limit]
+
     def list_segments_overlapping(
         self,
         *,
@@ -521,6 +663,33 @@ def _storage_backend() -> StorageBackend:
         access_key="access",
         secret_key="secret",
     )
+
+
+def _segment_request_webhook(**selectors: list[str]) -> WebhookRecord:
+    return WebhookRecord(
+        id=uuid4(),
+        data={
+            "url": "https://indexer.example.test/segments",
+            "events": ["flows/segments_requested"],
+            **selectors,
+        },
+        status="created",
+    )
+
+
+def _indexed_flow(repository: CountingRepository, *, segment_count: int) -> UUID:
+    flow_id = uuid4()
+    repository.save_flow(_flow(flow_id))
+    for index in range(segment_count):
+        repository.save_object(MediaObjectRecord(id=_object_id(index)))
+        repository.append_segment(
+            SegmentRecord(
+                flow_id=flow_id,
+                object_id=_object_id(index),
+                timerange=_timerange(index),
+            )
+        )
+    return flow_id
 
 
 def _flow(flow_id: UUID) -> FlowRecord:

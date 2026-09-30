@@ -80,6 +80,60 @@ def test_webhook_worker_delivers_payload_and_clears_claim(
     assert delivered_payload["event"]["flow"]["id"] == str(flow_id)
 
 
+def test_webhook_worker_delivers_segments_requested_extension_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    use_cases = route_worker_to_app(tamoss_app)
+    delivered: list[dict[str, Any]] = []
+
+    def send_success(
+        *,
+        webhook: dict[str, Any],
+        payload: dict[str, Any],
+        timeout_seconds: float,
+        egress_policy: object | None = None,
+    ):
+        delivered.append(payload)
+        return WebhookResponse(status_code=202, reason="Accepted")
+
+    monkeypatch.setattr(webhooking, "send_webhook_delivery", send_success)
+    registration = _webhook_payload()
+    registration["events"] = ["flows/segments_requested"]
+    assert client.post("/service/webhooks", json=registration).status_code == 201
+    flow_id = uuid4()
+    created = client.put(f"/flows/{flow_id}", json=video_flow_payload(flow_id, uuid4()))
+    assert created.status_code == 201
+
+    listed = client.get(
+        f"/flows/{flow_id}/segments", params={"timerange": "[0:0_10:0)"}
+    )
+
+    assert listed.status_code == 200
+    delivery = only_delivery(use_cases)
+    assert delivery.event_type == "flows/segments_requested"
+    assert (
+        worker.drain_webhook_deliveries(
+            use_cases,
+            max_deliveries=1,
+            worker_id="webhook-worker-a",
+            lease_seconds=30,
+        )
+        == 1
+    )
+    completed = use_cases.repository.get_webhook_delivery(delivery.id)
+    assert completed is not None
+    assert completed.status == "done"
+    assert delivered == [delivery.payload]
+    assert delivered[0]["event"] == {
+        "flow_id": str(flow_id),
+        "timerange": "[0:0_10:0)",
+        "missing_timeranges": ["[0:0_10:0)"],
+        "truncated": False,
+    }
+
+
 def test_webhook_worker_blocks_restricted_target_before_delivery(
     tamoss_app: FastAPI,
     client: TestClient,

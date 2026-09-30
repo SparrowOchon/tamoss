@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from tests.support.fixtures import load_yaml_fixture
 from tests.support.paths import REPO_ROOT, load_python_module
 
@@ -104,3 +106,90 @@ def test_model_contract_embedding_rewrites_external_schema_refs() -> None:
         "#/components/schemas/Uuid"
     )
     assert "Uuid" in components
+
+
+def _load_extensions_module():
+    return load_python_module(
+        "openapi_extensions",
+        REPO_ROOT / "src/scripts/openapi_extensions.py",
+    )
+
+
+def _embedded_webhook_spec() -> dict:
+    return {
+        "components": {
+            "schemas": {
+                "Uuid": {"type": "string"},
+                "Timerange": {"type": "string"},
+                "Webhook": {
+                    "properties": {
+                        "events": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["flows/created", "flows/segments_added"],
+                            },
+                        }
+                    }
+                },
+            }
+        },
+        "webhooks": {"flows/created": {"post": {}}},
+    }
+
+
+def test_model_contract_extensions_add_the_segments_requested_event_once() -> None:
+    module = _load_extensions_module()
+    openapi = _embedded_webhook_spec()
+
+    module.apply_tamoss_model_contract_extensions(openapi)
+    module.apply_tamoss_model_contract_extensions(openapi)
+
+    items = openapi["components"]["schemas"]["Webhook"]["properties"]["events"]["items"]
+    assert items["enum"] == [
+        "flows/created",
+        "flows/segments_added",
+        "flows/segments_requested",
+    ]
+    assert items["x-tamoss-extension-events"] == ["flows/segments_requested"]
+    assert list(openapi["webhooks"]) == ["flows/created", "flows/segments_requested"]
+
+
+def test_model_contract_extensions_document_the_segments_requested_webhook() -> None:
+    module = _load_extensions_module()
+    openapi = _embedded_webhook_spec()
+
+    module.apply_tamoss_model_contract_extensions(openapi)
+
+    entry = openapi["webhooks"]["flows/segments_requested"]
+    schema = entry["post"]["requestBody"]["content"]["application/json"]["schema"]
+    event = schema["properties"]["event"]
+    assert entry["x-tamoss-extension"] is True
+    assert entry["post"]["security"] == [{}]
+    assert schema["required"] == ["event_timestamp", "event_type", "event"]
+    assert schema["properties"]["event_type"]["const"] == "flows/segments_requested"
+    assert event["required"] == [
+        "flow_id",
+        "timerange",
+        "missing_timeranges",
+        "truncated",
+    ]
+    assert event["properties"]["flow_id"] == {"$ref": "#/components/schemas/Uuid"}
+    assert event["properties"]["missing_timeranges"]["items"] == {
+        "$ref": "#/components/schemas/Timerange"
+    }
+    assert entry["post"]["responses"]["200"]["description"] == (
+        "Webhook received successfully"
+    )
+    assert openapi["webhooks"]["flows/created"] == {"post": {}}
+
+
+def test_model_contract_extensions_fail_when_the_events_enum_is_missing() -> None:
+    module = _load_extensions_module()
+    openapi = _embedded_webhook_spec()
+    openapi["components"]["schemas"]["Webhook"]["properties"]["events"]["items"] = {
+        "$ref": "#/components/schemas/EventType"
+    }
+
+    with pytest.raises(ValueError, match="events enum"):
+        module.apply_tamoss_model_contract_extensions(openapi)

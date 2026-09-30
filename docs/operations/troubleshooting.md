@@ -133,6 +133,10 @@ default), so a missing success timestamp does not prove delivery never worked.
 `last_attempt_activity_at` is a state update, not an HTTP request start time.
 
 - No queued event: inspect registration time, status and selectors.
+- No `flows/segments_requested` event: confirm the registration lists it and
+  its selectors admit the Flow, that the Flow is not `read_only`, and that the
+  listing used a finite `timerange` on its first page without `object_id` over
+  a span with no registered Segment.
 - Pending or expired claim: inspect worker readiness, queue age and leases.
 - HTTP 401/403: compare callback authentication with the receiver's expected key.
 - Target blocked: inspect DNS and egress policy. Delivery pins the checked

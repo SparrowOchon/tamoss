@@ -21,7 +21,6 @@ from tamoss.adapters.postgres_repository.mappers import (
     _save_objects,
     _segment_from_record,
     _storage_backend_from_record,
-    _timerange_from_bounds,
 )
 from tamoss.adapters.postgres_repository.types import (
     MediaObjectRow,
@@ -35,6 +34,7 @@ from tamoss.domain.model import (
 )
 from tamoss.domain.pagination import Page, resolve_page_window
 from tamoss.domain.segments import SegmentDeleteFilter, SegmentTimerangeBounds
+from tamoss.domain.timeranges import timerange_from_bounds
 
 
 class PostgresObjectSegmentMixin:
@@ -195,7 +195,7 @@ class PostgresObjectSegmentMixin:
                 params,
             )
             row = cur.fetchone()
-        return _timerange_from_bounds(row[0], row[1]) if row else "()"
+        return timerange_from_bounds(row[0], row[1]) if row else "()"
 
     def delete_segment_batch(
         self, delete_filter: SegmentDeleteFilter, *, limit: int
@@ -272,6 +272,59 @@ class PostgresObjectSegmentMixin:
                 },
             )
             return [_segment_from_record(row[0]) for row in cur.fetchall()]
+
+    def list_segment_gaps(
+        self,
+        *,
+        flow_id: UUID,
+        timerange_start: int,
+        timerange_end: int,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH covered AS (
+                    SELECT
+                        GREATEST(timerange_start, %(timerange_start)s) AS span_start,
+                        MAX(LEAST(timerange_end, %(timerange_end)s)) OVER (
+                            ORDER BY timerange_start, timerange_end
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                        ) AS covered_end,
+                        MAX(LEAST(timerange_end, %(timerange_end)s))
+                            OVER () AS covered_max
+                    FROM tamoss_segments
+                    WHERE flow_id = %(flow_id)s
+                      AND timerange_start < %(timerange_end)s
+                      AND timerange_end > %(timerange_start)s
+                ),
+                gaps AS (
+                    SELECT
+                        COALESCE(covered_end, %(timerange_start)s) AS gap_start,
+                        span_start AS gap_end
+                    FROM covered
+                    WHERE span_start > COALESCE(covered_end, %(timerange_start)s)
+                    UNION ALL
+                    SELECT DISTINCT covered_max, %(timerange_end)s
+                    FROM covered
+                    WHERE covered_max < %(timerange_end)s
+                    UNION ALL
+                    SELECT %(timerange_start)s, %(timerange_end)s
+                    WHERE NOT EXISTS (SELECT 1 FROM covered)
+                )
+                SELECT gap_start, gap_end
+                FROM gaps
+                ORDER BY gap_start
+                LIMIT %(limit)s
+                """,
+                {
+                    "flow_id": flow_id,
+                    "timerange_start": timerange_start,
+                    "timerange_end": timerange_end,
+                    "limit": limit,
+                },
+            )
+            return [(row[0], row[1]) for row in cur.fetchall()]
 
     def list_segments_page(
         self,
@@ -351,7 +404,7 @@ class PostgresObjectSegmentMixin:
             else None
         )
         matched_timerange = (
-            _timerange_from_bounds(range_row[0], range_row[1]) if range_row else "()"
+            timerange_from_bounds(range_row[0], range_row[1]) if range_row else "()"
         )
         return Page(
             items=items,

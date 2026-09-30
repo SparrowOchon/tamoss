@@ -10,6 +10,7 @@ BBC_API_SPEC_PATH = REPO_ROOT / "src/vendor/bbc-tams/api/TimeAddressableMediaSto
 BBC_CONTENT_FORMAT_SCHEMA_PATH = (
     REPO_ROOT / "src/vendor/bbc-tams/api/schemas/content-format.json"
 )
+BBC_WEBHOOK_SCHEMA_PATH = REPO_ROOT / "src/vendor/bbc-tams/api/schemas/webhook.json"
 SCHEMA_ASSETS_DIR = REPO_ROOT / "src/app/tamoss/db/migrations/assets"
 
 

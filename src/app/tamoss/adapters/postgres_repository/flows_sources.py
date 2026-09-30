@@ -14,7 +14,6 @@ from tamoss.adapters.postgres_repository.mappers import (
     _save_flow,
     _source_from_record,
     _source_to_record,
-    _timerange_from_bounds,
 )
 from tamoss.adapters.postgres_repository.query_filters import (
     _append_flow_collected_by_filter,
@@ -30,6 +29,7 @@ from tamoss.domain.listing_pagination import listing_page, listing_window
 from tamoss.domain.listings import FlowSortBy, SourceSortBy
 from tamoss.domain.model import FlowRecord, SourceRecord, SourceRelationships
 from tamoss.domain.pagination import Page, resolve_page_window
+from tamoss.domain.timeranges import timerange_from_bounds
 
 
 class PostgresFlowSourceMixin:
@@ -228,7 +228,7 @@ class PostgresFlowSourceMixin:
             rows = cur.fetchall()
 
         for flow_id, timerange_start, timerange_end in rows:
-            timeranges[flow_id] = _timerange_from_bounds(timerange_start, timerange_end)
+            timeranges[flow_id] = timerange_from_bounds(timerange_start, timerange_end)
         return timeranges
 
     def get_flow(self, flow_id: UUID) -> FlowRecord | None:

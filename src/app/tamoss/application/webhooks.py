@@ -60,6 +60,7 @@ VALID_WEBHOOK_EVENTS = {
     "flows/deleted",
     "flows/segments_added",
     "flows/segments_deleted",
+    "flows/segments_requested",
     "sources/created",
     "sources/updated",
     "sources/deleted",
@@ -323,6 +324,21 @@ def active_webhooks_for_event(
     ]
 
 
+def webhooks_for_flow(
+    webhooks: list[WebhookRecord], flow: FlowRecord
+) -> list[WebhookRecord]:
+    flow_ids = [str(flow.id)]
+    source_ids = [str(flow.source_id)] if flow.source_id is not None else []
+    return [
+        webhook
+        for webhook in webhooks
+        if _selector_matches(flow_ids, _list_of_strings(webhook.data.get("flow_ids")))
+        and _selector_matches(
+            source_ids, _list_of_strings(webhook.data.get("source_ids"))
+        )
+    ]
+
+
 def publish_webhook_event(
     *,
     repository: WebhookEventRepository,
@@ -464,6 +480,29 @@ def publish_segments_added(
             webhook_data=webhook.data,
             object_storage=object_storage,
         ),
+    )
+
+
+def publish_segments_requested(
+    *,
+    repository: WebhookEventRepository,
+    resource_repository: FlowEventResourceRepository,
+    flow: FlowRecord,
+    timerange: str,
+    missing_timeranges: list[str],
+    truncated: bool,
+) -> list[WebhookDeliveryRecord]:
+    return _publish_flow_webhook_event(
+        repository=repository,
+        resource_repository=resource_repository,
+        event_type="flows/segments_requested",
+        flow=flow,
+        event_factory=lambda _webhook, _collected_by_ids: {
+            "flow_id": str(flow.id),
+            "timerange": timerange,
+            "missing_timeranges": missing_timeranges,
+            "truncated": truncated,
+        },
     )
 
 

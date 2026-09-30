@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,8 +11,10 @@ from uuid import UUID
 from mediatimestamp import TimeRange
 from pydantic import ValidationError
 
+from tamoss import metrics
 from tamoss.application import webhooks as webhooking
 from tamoss.application.contexts.flows import (
+    QueryTimerange,
     ensure_flow_writable,
     query_timerange,
     require_flow,
@@ -26,7 +29,7 @@ from tamoss.contract.generated import contract_models
 from tamoss.contract.serialization import contract_dump
 from tamoss.domain.exceptions import SEGMENT_OVERLAP_MESSAGE, SegmentOverlapError
 from tamoss.domain.model import FlowRecord, MediaObjectRecord, SegmentRecord, utc_now
-from tamoss.domain.pagination import Page, page_sequence
+from tamoss.domain.pagination import Page, page_sequence, resolve_page_window
 from tamoss.domain.segments import (
     SegmentTimerangeBounds,
     object_timerange_from_segment_fields,
@@ -35,6 +38,7 @@ from tamoss.domain.timeranges import (
     finite_normalized_timerange_bounds,
     parse_timerange,
     parse_timestamp,
+    timerange_from_bounds,
     timerange_union_strings,
 )
 from tamoss.errors import BadRequest
@@ -44,6 +48,8 @@ from tamoss.ports.repositories import (
     SegmentRepository,
     WebhookEventRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,6 +62,8 @@ type SegmentPostInput = dict[str, Any] | contract_models.FlowSegmentPost
 
 # Sentinel distinguishing "no pre-check performed" from "object missing".
 _UNCHECKED = object()
+
+SEGMENT_REQUEST_GAP_LIMIT = 10_000
 
 
 class SegmentUseCases:
@@ -504,10 +512,11 @@ class SegmentUseCases:
         page: str | None,
         limit: int | None,
     ) -> Page[SegmentRecord]:
-        if self.repository.get_flow(flow_id) is None:
+        flow = self.repository.get_flow(flow_id)
+        if flow is None:
             return page_sequence([], page=page, limit=limit)
         requested_timerange = query_timerange(timerange)
-        return self.repository.list_segments_page(
+        segment_page = self.repository.list_segments_page(
             flow_id=flow_id,
             object_id=object_id,
             timerange_start=requested_timerange.start,
@@ -518,6 +527,76 @@ class SegmentUseCases:
             page=page,
             limit=limit,
         )
+        bounds = self._reportable_segment_bounds(
+            requested_timerange, object_id=object_id, page=page, limit=limit
+        )
+        if bounds is not None and not flow.read_only:
+            self._report_uncovered_segment_request(
+                flow, timerange_start=bounds[0], timerange_end=bounds[1]
+            )
+        return segment_page
+
+    def _reportable_segment_bounds(
+        self,
+        requested: QueryTimerange,
+        *,
+        object_id: str | None,
+        page: str | None,
+        limit: int | None,
+    ) -> tuple[int, int] | None:
+        if (
+            object_id is not None
+            or requested.start is None
+            or requested.end is None
+            or requested.is_point
+            or resolve_page_window(page=page, limit=limit).offset != 0
+        ):
+            return None
+        return requested.start, requested.end
+
+    def _report_uncovered_segment_request(
+        self,
+        flow: FlowRecord,
+        *,
+        timerange_start: int,
+        timerange_end: int,
+    ) -> None:
+        try:
+            webhooks = webhooking.webhooks_for_flow(
+                webhooking.active_webhooks_for_event(
+                    self.webhook_repository, "flows/segments_requested"
+                ),
+                flow,
+            )
+            if not webhooks:
+                return
+            gaps = self.repository.list_segment_gaps(
+                flow_id=flow.id,
+                timerange_start=timerange_start,
+                timerange_end=timerange_end,
+                limit=SEGMENT_REQUEST_GAP_LIMIT + 1,
+            )
+            if not gaps:
+                return
+            with self.repository.unit_of_work():
+                deliveries = webhooking.publish_segments_requested(
+                    repository=self.webhook_repository,
+                    resource_repository=self.flow_repository,
+                    flow=flow,
+                    timerange=timerange_from_bounds(timerange_start, timerange_end),
+                    missing_timeranges=[
+                        timerange_from_bounds(start, end)
+                        for start, end in gaps[:SEGMENT_REQUEST_GAP_LIMIT]
+                    ],
+                    truncated=len(gaps) > SEGMENT_REQUEST_GAP_LIMIT,
+                )
+            if deliveries:
+                metrics.record_segment_request_event()
+        except Exception:
+            logger.exception(
+                "segments_requested event skipped",
+                extra={"flow_id": str(flow.id)},
+            )
 
     def segment_get_urls(
         self,

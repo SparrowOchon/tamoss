@@ -177,3 +177,88 @@ def _query_parameter_insert_index(parameters: list[Any], *, after_name: str) -> 
         ):
             return index + 1
     return len(parameters)
+
+
+def apply_tamoss_model_contract_extensions(spec: dict[str, Any]) -> None:
+    add_segments_requested_webhook_event(spec)
+
+
+def add_segments_requested_webhook_event(spec: dict[str, Any]) -> None:
+    schemas = spec.get("components", {}).get("schemas", {})
+    webhook = schemas.get("Webhook")
+    if not isinstance(webhook, dict):
+        return
+    events = webhook.get("properties", {}).get("events")
+    items = events.get("items") if isinstance(events, dict) else None
+    if not isinstance(items, dict):
+        return
+    enum = items.get("enum")
+    if not isinstance(enum, list):
+        raise ValueError("Webhook events enum not found in the embedded contract")
+    if "flows/segments_requested" not in enum:
+        enum.append("flows/segments_requested")
+    items["x-tamoss-extension-events"] = ["flows/segments_requested"]
+    webhooks = spec.setdefault("webhooks", {})
+    webhooks.setdefault("flows/segments_requested", _segments_requested_webhook())
+
+
+def _segments_requested_webhook() -> dict[str, Any]:
+    return {
+        "x-tamoss-extension": True,
+        "post": {
+            "security": [{}],
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "Flow Segments Requested",
+                            "description": (
+                                "TAMOSS extension. Notification that a client listed "
+                                "Flow Segments for a timerange that is not fully "
+                                "indexed, listing every unindexed span."
+                            ),
+                            "required": ["event_timestamp", "event_type", "event"],
+                            "properties": {
+                                "event_timestamp": {
+                                    "description": (
+                                        "Timestamp at which the Segment listing "
+                                        "was served"
+                                    ),
+                                    "type": "string",
+                                    "format": "date-time",
+                                },
+                                "event_type": {
+                                    "type": "string",
+                                    "const": "flows/segments_requested",
+                                },
+                                "event": _segments_requested_event_schema(),
+                            },
+                        }
+                    }
+                }
+            },
+            "responses": {"200": {"description": "Webhook received successfully"}},
+        },
+    }
+
+
+def _segments_requested_event_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["flow_id", "timerange", "missing_timeranges", "truncated"],
+        "properties": {
+            "flow_id": {"$ref": "#/components/schemas/Uuid"},
+            "timerange": {"$ref": "#/components/schemas/Timerange"},
+            "missing_timeranges": {
+                "type": "array",
+                "items": {"$ref": "#/components/schemas/Timerange"},
+            },
+            "truncated": {
+                "description": (
+                    "True when more Segments overlapped the request than were "
+                    "scanned, so spans after the last listed one are unknown"
+                ),
+                "type": "boolean",
+            },
+        },
+    }

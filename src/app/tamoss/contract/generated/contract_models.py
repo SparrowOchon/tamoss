@@ -820,6 +820,7 @@ class Event(StrEnum):
     sources_created = "sources/created"
     sources_updated = "sources/updated"
     sources_deleted = "sources/deleted"
+    flows_segments_requested = "flows/segments_requested"
 
 
 class Webhook(BaseModel):

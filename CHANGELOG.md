@@ -16,6 +16,8 @@ Release candidate for the second TAMOSS release implementing BBC TAMS 8.2.
   collection and webhook helpers.
 - Wait for recorded schema completion in fresh-install checks and compile UI
   assets on the native builder for multi-architecture images.
+- Add the `flows/segments_requested` webhook extension event, listing the
+  unindexed spans of a bounded Segment listing so an indexer can fetch them.
 
 Upgrades from `8.2.0-oss1` retain schema revision `8.2.0-oss1` and require no
 database migration. Deployments with an additional Nginx gateway must also apply

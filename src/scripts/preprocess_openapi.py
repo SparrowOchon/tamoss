@@ -22,7 +22,10 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from openapi_extensions import apply_tamoss_contract_extensions
+    from openapi_extensions import (
+        apply_tamoss_contract_extensions,
+        apply_tamoss_model_contract_extensions,
+    )
 except ModuleNotFoundError:
     extension_path = Path(__file__).with_name("openapi_extensions.py")
     spec = importlib.util.spec_from_file_location("openapi_extensions", extension_path)
@@ -31,6 +34,9 @@ except ModuleNotFoundError:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     apply_tamoss_contract_extensions = module.apply_tamoss_contract_extensions
+    apply_tamoss_model_contract_extensions = (
+        module.apply_tamoss_model_contract_extensions
+    )
 
 BBC_SCHEMA_REF_PREFIX = "vendor/bbc-tams/api/schemas/"
 PUBLIC_CONTRACT_TEXT_REPLACEMENTS = {
@@ -81,6 +87,7 @@ def build_model_contract_spec(
 ) -> dict[str, Any]:
     """Embed external BBC schemas for Pydantic contract generation."""
     embed_external_schema_refs_for_contract(processed_spec, schema_root=schema_root)
+    apply_tamoss_model_contract_extensions(processed_spec)
     return processed_spec
 
 

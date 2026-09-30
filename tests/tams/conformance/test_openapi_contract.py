@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from types import ModuleType
 
 import pytest
 from fastapi import FastAPI
 
 from tests.support.paths import load_python_module
-from tests.tams.support import BBC_API_SPEC_PATH, REPO_ROOT
+from tests.tams.support import BBC_API_SPEC_PATH, BBC_WEBHOOK_SCHEMA_PATH, REPO_ROOT
 
 pytestmark = [pytest.mark.tams_conformance, pytest.mark.tams_contract]
 
@@ -98,6 +99,36 @@ def test_runtime_openapi_distinguishes_core_and_compatibility_timerange_paramete
         "Third-party compatibility extension" in list_include_timerange["description"]
     )
     assert "x-tamoss-extension" not in detail_include_timerange
+
+
+@pytest.mark.tamoss_extension
+def test_runtime_openapi_marks_segments_requested_webhook_event_as_extension(
+    tamoss_app: FastAPI,
+) -> None:
+    schema = tamoss_app.openapi()
+    events = schema["components"]["schemas"]["Webhook"]["properties"]["events"]["items"]
+    bbc_events = json.loads(BBC_WEBHOOK_SCHEMA_PATH.read_text(encoding="utf-8"))[
+        "properties"
+    ]["events"]["items"]["enum"]
+    webhooks = schema["webhooks"]
+    event_schema = webhooks["flows/segments_requested"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]
+
+    assert events["x-tamoss-extension-events"] == ["flows/segments_requested"]
+    assert "flows/segments_requested" in events["enum"]
+    assert [
+        event
+        for event in events["enum"]
+        if event not in events["x-tamoss-extension-events"]
+    ] == bbc_events
+    assert webhooks["flows/segments_requested"]["x-tamoss-extension"] is True
+    assert event_schema["properties"]["event_type"]["const"] == (
+        "flows/segments_requested"
+    )
+    assert [
+        name for name, entry in webhooks.items() if "x-tamoss-extension" in entry
+    ] == ["flows/segments_requested"]
 
 
 def test_runtime_openapi_uses_bbc_error_response_codes(tamoss_app: FastAPI) -> None:

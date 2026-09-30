@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from mediatimestamp import TimeRange, Timestamp
+from mediatimestamp import TimeRange
 from psycopg.types.json import Jsonb
 
 from tamoss.adapters.postgres_repository.types import (
@@ -866,13 +866,3 @@ def _timerange_bounds(timerange: str) -> tuple[int, int]:
     assert bounds.start is not None
     assert bounds.end is not None
     return bounds.start, bounds.end
-
-
-def _timerange_from_bounds(start: int | None, end: int | None) -> str:
-    if start is None or end is None:
-        return "()"
-    start_ts = Timestamp.from_nanosec(start)
-    end_ts = Timestamp.from_nanosec(end)
-    if start == end:
-        return f"[{start_ts}]"
-    return f"[{start_ts}_{end_ts})"
