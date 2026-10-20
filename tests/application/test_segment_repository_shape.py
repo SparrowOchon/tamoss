@@ -346,20 +346,70 @@ def test_subscribed_uncovered_listing_runs_one_gap_query_and_publishes_once() ->
 
     assert response.status_code == 200
     assert repository.list_segments_page_calls == 1
-    assert repository.list_webhooks_calls == 2
+    assert repository.list_webhooks_calls == 1
     assert repository.list_segment_gaps_calls == 1
     assert repository.list_flows_collecting_calls == 1
     assert repository.save_webhook_delivery_calls == 1
-    assert [
-        delivery.payload["event"] for delivery in repository.webhook_deliveries
-    ] == [
-        {
-            "flow_id": str(flow_id),
-            "timerange": "[0:0_5:0)",
-            "missing_timeranges": ["[3:0_5:0)"],
-            "truncated": False,
-        }
-    ]
+    (delivery,) = repository.webhook_deliveries
+    event = dict(delivery.payload["event"])
+    assert event.pop("flow")["id"] == str(flow_id)
+    assert event == {
+        "flow_id": str(flow_id),
+        "timerange": "[0:0_5:0)",
+        "missing_timeranges": ["[3:0_5:0)"],
+        "truncated": False,
+    }
+
+
+def test_unknown_flow_listing_with_subscriber_publishes_without_further_queries() -> (
+    None
+):
+    repository = CountingRepository(_storage_backend())
+    repository.save_webhook(_segment_request_webhook())
+    repository.reset_counts()
+    flow_id = uuid4()
+
+    with TestClient(
+        create_app(_settings(), use_cases=_use_cases(repository))
+    ) as client:
+        response = client.get(
+            f"/flows/{flow_id}/segments", params={"timerange": "[0:0_5:0)"}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert repository.list_segments_page_calls == 0
+    assert repository.list_webhooks_calls == 1
+    assert repository.list_segment_gaps_calls == 0
+    assert repository.list_flows_collecting_calls == 0
+    assert repository.save_webhook_delivery_calls == 1
+    (delivery,) = repository.webhook_deliveries
+    assert delivery.payload["event"] == {
+        "flow_id": str(flow_id),
+        "timerange": "[0:0_5:0)",
+        "missing_timeranges": ["[0:0_5:0)"],
+        "truncated": False,
+    }
+
+
+def test_unknown_flow_listing_without_subscribers_adds_only_the_webhook_lookup() -> (
+    None
+):
+    repository = CountingRepository(_storage_backend())
+    repository.reset_counts()
+
+    with TestClient(
+        create_app(_settings(), use_cases=_use_cases(repository))
+    ) as client:
+        response = client.get(
+            f"/flows/{uuid4()}/segments", params={"timerange": "[0:0_5:0)"}
+        )
+
+    assert response.status_code == 200
+    assert repository.list_webhooks_calls == 1
+    assert repository.list_segment_gaps_calls == 0
+    assert repository.list_flows_collecting_calls == 0
+    assert repository.save_webhook_delivery_calls == 0
 
 
 def test_subscriber_scoped_to_another_flow_skips_the_gap_query_and_the_metric() -> None:
@@ -695,7 +745,15 @@ def _indexed_flow(repository: CountingRepository, *, segment_count: int) -> UUID
 def _flow(flow_id: UUID) -> FlowRecord:
     return FlowRecord(
         id=flow_id,
-        data={"label": "Performance shape"},
+        data={
+            "label": "Performance shape",
+            "codec": "video/h264",
+            "essence_parameters": {
+                "frame_width": 1920,
+                "frame_height": 1080,
+                "frame_rate": {"numerator": 25, "denominator": 1},
+            },
+        },
         source_id=uuid4(),
         format="urn:x-nmos:format:video",
         container="video/mp2t",

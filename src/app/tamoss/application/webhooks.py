@@ -339,6 +339,28 @@ def webhooks_for_flow(
     ]
 
 
+def webhooks_for_missing_flow(
+    webhooks: list[WebhookRecord], flow_id: UUID
+) -> list[WebhookRecord]:
+    flow_ids = [str(flow_id)]
+    return [
+        webhook
+        for webhook in webhooks
+        if webhook_matches(
+            webhook.data,
+            event_type="flows/segments_requested",
+            flow_ids=flow_ids,
+            source_ids=[],
+            flow_collected_by_ids=[],
+            source_collected_by_ids=[],
+        )
+    ]
+
+
+def publishable_flow_id(flow_id: UUID) -> bool:
+    return flow_id.version in {1, 2, 3, 4, 5}
+
+
 def publish_webhook_event(
     *,
     repository: WebhookEventRepository,
@@ -349,9 +371,11 @@ def publish_webhook_event(
     flow_collected_by_ids: list[str],
     source_collected_by_ids: list[str],
     webhooks: list[WebhookRecord] | None = None,
+    flow_ids: list[str] | None = None,
 ) -> list[WebhookDeliveryRecord]:
     event_timestamp = utc_now()
-    flow_ids = [str(flow.id)] if flow is not None else []
+    if flow_ids is None:
+        flow_ids = [str(flow.id)] if flow is not None else []
     source_ids = [str(source.id)] if source is not None else []
     deliveries: list[WebhookDeliveryRecord] = []
 
@@ -405,8 +429,10 @@ def _publish_flow_webhook_event(
     flow: FlowRecord,
     event_factory: FlowWebhookEventFactory,
     event_context: FlowEventContext | None = None,
+    webhooks: list[WebhookRecord] | None = None,
 ) -> list[WebhookDeliveryRecord]:
-    webhooks = active_webhooks_for_event(repository, event_type)
+    if webhooks is None:
+        webhooks = active_webhooks_for_event(repository, event_type)
     if not webhooks:
         return []
     context = event_context or flow_event_context(resource_repository, flow)
@@ -491,18 +517,56 @@ def publish_segments_requested(
     timerange: str,
     missing_timeranges: list[str],
     truncated: bool,
+    webhooks: list[WebhookRecord] | None = None,
 ) -> list[WebhookDeliveryRecord]:
+    event_cache: dict[str, JsonPayload] = {}
+
+    def build_event(
+        _webhook: WebhookRecord, collected_by_ids: list[str]
+    ) -> JsonPayload:
+        if "event" not in event_cache:
+            event_cache["event"] = {
+                "flow_id": str(flow.id),
+                "flow": flow_payload(flow_with_collected_by(flow, collected_by_ids)),
+                "timerange": timerange,
+                "missing_timeranges": missing_timeranges,
+                "truncated": truncated,
+            }
+        return event_cache["event"]
+
     return _publish_flow_webhook_event(
         repository=repository,
         resource_repository=resource_repository,
         event_type="flows/segments_requested",
         flow=flow,
-        event_factory=lambda _webhook, _collected_by_ids: {
-            "flow_id": str(flow.id),
-            "timerange": timerange,
-            "missing_timeranges": missing_timeranges,
-            "truncated": truncated,
-        },
+        event_factory=build_event,
+        webhooks=webhooks,
+    )
+
+
+def publish_missing_flow_segments_requested(
+    *,
+    repository: WebhookEventRepository,
+    flow_id: UUID,
+    timerange: str,
+    webhooks: list[WebhookRecord],
+) -> list[WebhookDeliveryRecord]:
+    event: JsonPayload = {
+        "flow_id": str(flow_id),
+        "timerange": timerange,
+        "missing_timeranges": [timerange],
+        "truncated": False,
+    }
+    return publish_webhook_event(
+        repository=repository,
+        event_type="flows/segments_requested",
+        event_factory=lambda _webhook: event,
+        flow=None,
+        source=None,
+        flow_collected_by_ids=[],
+        source_collected_by_ids=[],
+        webhooks=webhooks,
+        flow_ids=[str(flow_id)],
     )
 
 

@@ -126,6 +126,16 @@ def test_runtime_openapi_marks_segments_requested_webhook_event_as_extension(
     assert event_schema["properties"]["event_type"]["const"] == (
         "flows/segments_requested"
     )
+    assert (
+        event_schema["properties"]["event"]["properties"]["flow"]["$ref"]
+        == "#/components/schemas/FlowGet"
+    )
+    assert event_schema["properties"]["event"]["required"] == [
+        "flow_id",
+        "timerange",
+        "missing_timeranges",
+        "truncated",
+    ]
     assert [
         name for name, entry in webhooks.items() if "x-tamoss-extension" in entry
     ] == ["flows/segments_requested"]

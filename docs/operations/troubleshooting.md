@@ -136,7 +136,11 @@ default), so a missing success timestamp does not prove delivery never worked.
 - No `flows/segments_requested` event: confirm the registration lists it and
   its selectors admit the Flow, that the Flow is not `read_only`, and that the
   listing used a finite `timerange` on its first page without `object_id` over
-  a span with no registered Segment.
+  a span with no registered Segment. Listings for a Flow that does not exist
+  queue the event too, but only when the id matches the BBC TAMS `uuid`
+  pattern, and only for registrations whose `flow_ids` selector is omitted or
+  contains the id and whose `source_ids` and collected-by selectors are
+  omitted or empty lists; a non-empty selector cannot match an unknown Flow.
 - Pending or expired claim: inspect worker readiness, queue age and leases.
 - HTTP 401/403: compare callback authentication with the receiver's expected key.
 - Target blocked: inspect DNS and egress policy. Delivery pins the checked

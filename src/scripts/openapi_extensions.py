@@ -248,6 +248,14 @@ def _segments_requested_event_schema() -> dict[str, Any]:
         "required": ["flow_id", "timerange", "missing_timeranges", "truncated"],
         "properties": {
             "flow_id": {"$ref": "#/components/schemas/Uuid"},
+            "flow": {
+                "description": (
+                    "The requested Flow as stored, including tags and "
+                    "container_mapping. Omitted when the Flow does not exist "
+                    "in the store."
+                ),
+                "$ref": "#/components/schemas/FlowGet",
+            },
             "timerange": {"$ref": "#/components/schemas/Timerange"},
             "missing_timeranges": {
                 "type": "array",
@@ -255,8 +263,9 @@ def _segments_requested_event_schema() -> dict[str, Any]:
             },
             "truncated": {
                 "description": (
-                    "True when more Segments overlapped the request than were "
-                    "scanned, so spans after the last listed one are unknown"
+                    "True when more than 10000 missing timeranges were found; "
+                    "missing_timeranges stops at the last span shown, so later "
+                    "spans in the request may also be missing"
                 ),
                 "type": "boolean",
             },

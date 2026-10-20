@@ -18,6 +18,10 @@ Release candidate for the second TAMOSS release implementing BBC TAMS 8.2.
   assets on the native builder for multi-architecture images.
 - Add the `flows/segments_requested` webhook extension event, listing the
   unindexed spans of a bounded Segment listing so an indexer can fetch them.
+  The event embeds the stored Flow, including its `tags` and
+  `container_mapping`, and a `GET` or `HEAD /flows/{flowId}/segments` listing
+  for a Flow that does not exist queues it too, reporting the whole requested
+  timerange as missing without the Flow embed.
 
 Upgrades from `8.2.0-oss1` retain schema revision `8.2.0-oss1` and require no
 database migration. Deployments with an additional Nginx gateway must also apply

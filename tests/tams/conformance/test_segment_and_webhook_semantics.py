@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID, uuid4
 
 import pytest
@@ -341,14 +342,14 @@ def test_partially_indexed_listing_queues_one_event_listing_every_missing_span(
         "[0:0_10:0)",
         "[20:0_30:0)",
     ]
-    assert _segments_requested_events(tamoss_app) == [
-        {
-            "flow_id": str(flow_id),
-            "timerange": "[0:0_40:0)",
-            "missing_timeranges": ["[10:0_20:0)", "[30:0_40:0)"],
-            "truncated": False,
-        }
-    ]
+    (event,) = _segments_requested_events(tamoss_app)
+    assert event == {
+        "flow_id": str(flow_id),
+        "flow": client.get(f"/flows/{flow_id}").json(),
+        "timerange": "[0:0_40:0)",
+        "missing_timeranges": ["[10:0_20:0)", "[30:0_40:0)"],
+        "truncated": False,
+    }
 
 
 @pytest.mark.tamoss_extension
@@ -479,19 +480,139 @@ def test_object_id_open_ended_point_empty_and_second_page_listings_queue_no_even
 
 
 @pytest.mark.tamoss_extension
-def test_listing_for_an_unknown_flow_queues_no_event(
+def test_listing_for_an_unknown_flow_reports_the_whole_range_missing(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_segment_requests(client)
+    flow_id = uuid4()
+    before = REGISTRY.get_sample_value("tamoss_segment_request_events_total") or 0.0
+
+    listed = client.get(
+        f"/flows/{flow_id}/segments", params={"timerange": "[0:0_40:0)"}
+    )
+
+    assert listed.status_code == 200
+    assert listed.json() == []
+    assert listed.headers["x-paging-timerange"] == "()"
+    assert _segments_requested_events(tamoss_app) == [
+        {
+            "flow_id": str(flow_id),
+            "timerange": "[0:0_40:0)",
+            "missing_timeranges": ["[0:0_40:0)"],
+            "truncated": False,
+        }
+    ]
+    assert REGISTRY.get_sample_value("tamoss_segment_request_events_total") == (
+        before + 1
+    )
+
+
+@pytest.mark.tamoss_extension
+def test_unknown_flow_head_listing_queues_the_event_like_get(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_segment_requests(client)
+    flow_id = uuid4()
+
+    probed = client.head(
+        f"/flows/{flow_id}/segments", params={"timerange": "[0:0_40:0)"}
+    )
+
+    assert probed.status_code == 200
+    assert probed.content == b""
+    assert [
+        event["missing_timeranges"] for event in _segments_requested_events(tamoss_app)
+    ] == [["[0:0_40:0)"]]
+
+
+@pytest.mark.tamoss_extension
+def test_unknown_flow_listing_with_invalid_timerange_queues_no_event(
     tamoss_app: FastAPI,
     client: TestClient,
 ) -> None:
     _subscribe_to_segment_requests(client)
 
     listed = client.get(
-        f"/flows/{uuid4()}/segments", params={"timerange": "[0:0_40:0)"}
+        f"/flows/{uuid4()}/segments", params={"timerange": "not-a-timerange"}
     )
 
     assert listed.status_code == 200
     assert listed.json() == []
+    assert listed.headers["x-paging-timerange"] == "()"
     assert _segments_requested_events(tamoss_app) == []
+
+
+@pytest.mark.tamoss_extension
+def test_unknown_flow_non_reportable_listings_queue_no_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_segment_requests(client)
+
+    for params in (
+        {},
+        {"timerange": "[0:0_40:0)", "object_id": "bbc/missing.ts"},
+        {"timerange": "[0:0_"},
+        {"timerange": "_40:0)"},
+        {"timerange": "[15:0]"},
+        {"timerange": "()"},
+        {"timerange": "[0:0_40:0)", "limit": "1", "page": "1"},
+    ):
+        listed = client.get(f"/flows/{uuid4()}/segments", params=params)
+        assert listed.status_code == 200, params
+        assert _segments_requested_events(tamoss_app) == [], params
+
+
+@pytest.mark.tamoss_extension
+def test_unknown_flow_listing_without_a_subscriber_queues_nothing(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/service/webhooks", json=webhook_payload(events=["flows/segments_added"])
+    )
+    assert created.status_code == 201
+    repository = tamoss_app.state.tamoss_use_cases.repository
+    deliveries_before = len(repository.list_webhook_deliveries())
+
+    listed = client.get(
+        f"/flows/{uuid4()}/segments", params={"timerange": "[0:0_40:0)"}
+    )
+
+    assert listed.status_code == 200
+    assert len(repository.list_webhook_deliveries()) == deliveries_before
+
+
+@pytest.mark.tamoss_extension
+def test_unknown_flow_listing_matches_flow_selectors_but_never_source_selectors(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    flow_id = uuid4()
+    matching_flow = _subscribe_to_segment_requests(
+        client, url="https://flow.example.test/webhook", flow_ids=[str(flow_id)]
+    )
+    unscoped = _subscribe_to_segment_requests(
+        client, url="https://unscoped.example.test/webhook"
+    )
+    _subscribe_to_segment_requests(
+        client, url="https://other-flow.example.test/webhook", flow_ids=[str(uuid4())]
+    )
+    _subscribe_to_segment_requests(
+        client, url="https://source.example.test/webhook", source_ids=[str(uuid4())]
+    )
+
+    listed = client.get(
+        f"/flows/{flow_id}/segments", params={"timerange": "[0:0_40:0)"}
+    )
+
+    assert listed.status_code == 200
+    assert _deleted_event_resource_ids_by_webhook(tamoss_app, id_name="flow_id") == {
+        matching_flow: {str(flow_id)},
+        unscoped: {str(flow_id)},
+    }
 
 
 @pytest.mark.tamoss_extension
@@ -594,14 +715,14 @@ def test_segment_request_event_flags_truncation_past_the_gap_limit(
     )
 
     assert listed.status_code == 200
-    assert _segments_requested_events(tamoss_app) == [
-        {
-            "flow_id": str(flow_id),
-            "timerange": "[0:0_10:0)",
-            "missing_timeranges": ["[1:0_2:0)"],
-            "truncated": True,
-        }
-    ]
+    (event,) = _segments_requested_events(tamoss_app)
+    assert event == {
+        "flow_id": str(flow_id),
+        "flow": client.get(f"/flows/{flow_id}").json(),
+        "timerange": "[0:0_10:0)",
+        "missing_timeranges": ["[1:0_2:0)"],
+        "truncated": True,
+    }
 
 
 @pytest.mark.tamoss_extension
@@ -661,6 +782,148 @@ def test_segment_request_reporting_adds_no_response_headers(
     assert listed.headers["x-paging-timerange"] == "[0:0_30:0)"
     assert listed.headers["x-paging-count"] == "2"
     assert len(_segments_requested_events(tamoss_app)) == 1
+
+
+@pytest.mark.tamoss_extension
+def test_segment_request_event_embeds_the_stored_flow_with_tags_and_container_mapping(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_segment_requests(client)
+    flow_id, _, _ = create_video_flow(
+        client,
+        tags={"channel": "bbc1", "quality": "hd"},
+        container_mapping={
+            "track_index": 0,
+            "format_track_index": 0,
+            "vendor_extension": None,
+        },
+    )
+
+    listed = client.get(
+        f"/flows/{flow_id}/segments", params={"timerange": "[0:0_40:0)"}
+    )
+
+    assert listed.status_code == 200
+    (event,) = _segments_requested_events(tamoss_app)
+    assert event["flow"] == client.get(f"/flows/{flow_id}").json()
+    assert event["flow"]["tags"] == {"channel": "bbc1", "quality": "hd"}
+    assert event["flow"]["container_mapping"] == {
+        "track_index": 0,
+        "format_track_index": 0,
+        "vendor_extension": None,
+    }
+
+
+@pytest.mark.tamoss_extension
+def test_segment_request_event_embed_includes_collected_by(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_segment_requests(client)
+    child_flow_id, _, _ = create_video_flow(client)
+    parent_flow_id = uuid4()
+    parent = client.put(
+        f"/flows/{parent_flow_id}",
+        json=multi_flow_payload(parent_flow_id, uuid4()),
+    )
+    assert parent.status_code == 201
+    collection = client.put(
+        f"/flows/{parent_flow_id}/flow_collection",
+        json=[flow_collection_item(child_flow_id)],
+    )
+    assert collection.status_code == 204
+
+    listed = client.get(
+        f"/flows/{child_flow_id}/segments", params={"timerange": "[0:0_40:0)"}
+    )
+
+    assert listed.status_code == 200
+    events = [
+        event
+        for event in _segments_requested_events(tamoss_app)
+        if event["flow_id"] == str(child_flow_id)
+    ]
+    (event,) = events
+    assert event["flow"]["collected_by"] == [str(parent_flow_id)]
+    assert event["flow"] == client.get(f"/flows/{child_flow_id}").json()
+
+
+@pytest.mark.tamoss_extension
+def test_unknown_flow_listing_collected_by_selectors_match_only_when_empty(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    flow_id = uuid4()
+    empty_flow_collected = _subscribe_to_segment_requests(
+        client,
+        url="https://empty-flow-collected.example.test/webhook",
+        flow_collected_by_ids=[],
+    )
+    empty_source_collected = _subscribe_to_segment_requests(
+        client,
+        url="https://empty-source-collected.example.test/webhook",
+        source_collected_by_ids=[],
+    )
+    _subscribe_to_segment_requests(
+        client,
+        url="https://flow-collected.example.test/webhook",
+        flow_collected_by_ids=[str(uuid4())],
+    )
+    _subscribe_to_segment_requests(
+        client,
+        url="https://source-collected.example.test/webhook",
+        source_collected_by_ids=[str(uuid4())],
+    )
+
+    listed = client.get(
+        f"/flows/{flow_id}/segments", params={"timerange": "[0:0_40:0)"}
+    )
+
+    assert listed.status_code == 200
+    assert _deleted_event_resource_ids_by_webhook(tamoss_app, id_name="flow_id") == {
+        empty_flow_collected: {str(flow_id)},
+        empty_source_collected: {str(flow_id)},
+    }
+
+
+@pytest.mark.tamoss_extension
+def test_listing_for_an_unknown_noncontract_flow_id_queues_no_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_segment_requests(client)
+
+    for flow_id in (
+        "00000000-0000-0000-0000-000000000000",
+        "01890a5d-ac96-774b-bcce-b302099a8057",
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+    ):
+        listed = client.get(
+            f"/flows/{flow_id}/segments", params={"timerange": "[0:0_40:0)"}
+        )
+        assert listed.status_code == 200, flow_id
+        assert listed.json() == []
+        assert _segments_requested_events(tamoss_app) == [], flow_id
+
+
+@pytest.mark.tamoss_extension
+def test_unknown_flow_listing_with_invalid_page_logs_no_error(
+    tamoss_app: FastAPI,
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _subscribe_to_segment_requests(client)
+
+    with caplog.at_level(logging.INFO):
+        listed = client.get(
+            f"/flows/{uuid4()}/segments",
+            params={"timerange": "[0:0_40:0)", "page": "abc"},
+        )
+
+    assert listed.status_code == 400
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert _segments_requested_events(tamoss_app) == []
 
 
 def _register_collection_selector_webhooks(

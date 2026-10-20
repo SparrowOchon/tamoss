@@ -175,6 +175,7 @@ def test_model_contract_extensions_document_the_segments_requested_webhook() -> 
         "truncated",
     ]
     assert event["properties"]["flow_id"] == {"$ref": "#/components/schemas/Uuid"}
+    assert event["properties"]["flow"]["$ref"] == "#/components/schemas/FlowGet"
     assert event["properties"]["missing_timeranges"]["items"] == {
         "$ref": "#/components/schemas/Timerange"
     }

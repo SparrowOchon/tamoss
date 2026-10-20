@@ -40,18 +40,31 @@ These endpoints are TAMOSS operational endpoints, not BBC TAMS resources:
 set. The runtime `/openapi.json` lists it under `x-tamoss-extension-events` on
 the webhook `events` schema and documents its payload under `webhooks` with
 `x-tamoss-extension: true`. Registrations that list only BBC events never
-receive it.
+receive it, and the event never changes the response of the request that
+queues it.
 
 The event is queued when a `GET` or `HEAD /flows/{flowId}/segments` request
 with a finite `timerange` whose start and end differ, on its first page and
 without `object_id`, covers a span with no registered Segment. Read-only Flows
 never queue it because no Segment can be registered into them. Inclusive ends
 are normalised, so `[a_b]` also asks for the instant `b`. The `event` body
-carries `flow_id`, the requested `timerange`, `missing_timeranges` listing every
-unindexed span in order, and `truncated`, which is `true` when more than 10000
-spans were found and the list stops at the last one shown. Every such request
-queues one event per subscribed webhook whose `flow_ids` and `source_ids`
-selectors admit the Flow, so scope registrations with those selectors.
+carries `flow_id`, the requested `timerange`, `missing_timeranges` listing
+every unindexed span in order, `truncated`, which is `true` when more than
+10000 missing timeranges were found and the list stops at the last one shown,
+and `flow`, the requested Flow as stored, including its `tags` and
+`container_mapping`. The listing also queues the event when the Flow itself
+does not exist: the response stays an empty listing, the whole requested
+timerange is reported missing, and `flow` is omitted, so a missing `flow`
+means the Flow is not in the store. Unknown Flows are only reported when the
+requested id matches the BBC TAMS `uuid` pattern.
+
+For an existing Flow, every such request queues one event per subscribed
+webhook whose `flow_ids`, `source_ids` and collected-by selectors admit the
+Flow, so scope registrations with those selectors. When the Flow does not
+exist, only its requested id is known: a registration matches when its
+`flow_ids` selector is omitted or contains the id and each of its other
+selectors is omitted or an empty list, while a non-empty `source_ids` or
+collected-by selector never matches an unknown Flow.
 
 ## Authentication
 

@@ -514,6 +514,13 @@ class SegmentUseCases:
     ) -> Page[SegmentRecord]:
         flow = self.repository.get_flow(flow_id)
         if flow is None:
+            self._report_missing_flow_segment_request(
+                flow_id,
+                timerange=timerange,
+                object_id=object_id,
+                page=page,
+                limit=limit,
+            )
             return page_sequence([], page=page, limit=limit)
         requested_timerange = query_timerange(timerange)
         segment_page = self.repository.list_segments_page(
@@ -589,6 +596,7 @@ class SegmentUseCases:
                         for start, end in gaps[:SEGMENT_REQUEST_GAP_LIMIT]
                     ],
                     truncated=len(gaps) > SEGMENT_REQUEST_GAP_LIMIT,
+                    webhooks=webhooks,
                 )
             if deliveries:
                 metrics.record_segment_request_event()
@@ -596,6 +604,52 @@ class SegmentUseCases:
             logger.exception(
                 "segments_requested event skipped",
                 extra={"flow_id": str(flow.id)},
+            )
+
+    def _report_missing_flow_segment_request(
+        self,
+        flow_id: UUID,
+        *,
+        timerange: str | None,
+        object_id: str | None,
+        page: str | None,
+        limit: int | None,
+    ) -> None:
+        try:
+            if not webhooking.publishable_flow_id(flow_id):
+                return
+            try:
+                bounds = self._reportable_segment_bounds(
+                    query_timerange(timerange),
+                    object_id=object_id,
+                    page=page,
+                    limit=limit,
+                )
+            except BadRequest:
+                return
+            if bounds is None:
+                return
+            webhooks = webhooking.webhooks_for_missing_flow(
+                webhooking.active_webhooks_for_event(
+                    self.webhook_repository, "flows/segments_requested"
+                ),
+                flow_id,
+            )
+            if not webhooks:
+                return
+            with self.repository.unit_of_work():
+                deliveries = webhooking.publish_missing_flow_segments_requested(
+                    repository=self.webhook_repository,
+                    flow_id=flow_id,
+                    timerange=timerange_from_bounds(*bounds),
+                    webhooks=webhooks,
+                )
+            if deliveries:
+                metrics.record_segment_request_event()
+        except Exception:
+            logger.exception(
+                "segments_requested event skipped",
+                extra={"flow_id": str(flow_id)},
             )
 
     def segment_get_urls(

@@ -128,6 +128,7 @@ def test_webhook_worker_delivers_segments_requested_extension_event(
     assert delivered == [delivery.payload]
     assert delivered[0]["event"] == {
         "flow_id": str(flow_id),
+        "flow": client.get(f"/flows/{flow_id}").json(),
         "timerange": "[0:0_10:0)",
         "missing_timeranges": ["[0:0_10:0)"],
         "truncated": False,
