@@ -60,7 +60,7 @@ VALID_WEBHOOK_EVENTS = {
     "flows/deleted",
     "flows/segments_added",
     "flows/segments_deleted",
-    "flows/segments_requested",
+    "flows/segments_missing",
     "sources/created",
     "sources/updated",
     "sources/deleted",
@@ -348,7 +348,7 @@ def webhooks_for_missing_flow(
         for webhook in webhooks
         if webhook_matches(
             webhook.data,
-            event_type="flows/segments_requested",
+            event_type="flows/segments_missing",
             flow_ids=flow_ids,
             source_ids=[],
             flow_collected_by_ids=[],
@@ -509,7 +509,7 @@ def publish_segments_added(
     )
 
 
-def publish_segments_requested(
+def publish_segments_missing(
     *,
     repository: WebhookEventRepository,
     resource_repository: FlowEventResourceRepository,
@@ -537,14 +537,14 @@ def publish_segments_requested(
     return _publish_flow_webhook_event(
         repository=repository,
         resource_repository=resource_repository,
-        event_type="flows/segments_requested",
+        event_type="flows/segments_missing",
         flow=flow,
         event_factory=build_event,
         webhooks=webhooks,
     )
 
 
-def publish_missing_flow_segments_requested(
+def publish_unknown_flow_segments_missing(
     *,
     repository: WebhookEventRepository,
     flow_id: UUID,
@@ -559,7 +559,7 @@ def publish_missing_flow_segments_requested(
     }
     return publish_webhook_event(
         repository=repository,
-        event_type="flows/segments_requested",
+        event_type="flows/segments_missing",
         event_factory=lambda _webhook: event,
         flow=None,
         source=None,

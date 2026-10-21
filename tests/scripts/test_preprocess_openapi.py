@@ -138,7 +138,7 @@ def _embedded_webhook_spec() -> dict:
     }
 
 
-def test_model_contract_extensions_add_the_segments_requested_event_once() -> None:
+def test_model_contract_extensions_add_the_segments_missing_event_once() -> None:
     module = _load_extensions_module()
     openapi = _embedded_webhook_spec()
 
@@ -149,25 +149,25 @@ def test_model_contract_extensions_add_the_segments_requested_event_once() -> No
     assert items["enum"] == [
         "flows/created",
         "flows/segments_added",
-        "flows/segments_requested",
+        "flows/segments_missing",
     ]
-    assert items["x-tamoss-extension-events"] == ["flows/segments_requested"]
-    assert list(openapi["webhooks"]) == ["flows/created", "flows/segments_requested"]
+    assert items["x-tamoss-extension-events"] == ["flows/segments_missing"]
+    assert list(openapi["webhooks"]) == ["flows/created", "flows/segments_missing"]
 
 
-def test_model_contract_extensions_document_the_segments_requested_webhook() -> None:
+def test_model_contract_extensions_document_the_segments_missing_webhook() -> None:
     module = _load_extensions_module()
     openapi = _embedded_webhook_spec()
 
     module.apply_tamoss_model_contract_extensions(openapi)
 
-    entry = openapi["webhooks"]["flows/segments_requested"]
+    entry = openapi["webhooks"]["flows/segments_missing"]
     schema = entry["post"]["requestBody"]["content"]["application/json"]["schema"]
     event = schema["properties"]["event"]
     assert entry["x-tamoss-extension"] is True
     assert entry["post"]["security"] == [{}]
     assert schema["required"] == ["event_timestamp", "event_type", "event"]
-    assert schema["properties"]["event_type"]["const"] == "flows/segments_requested"
+    assert schema["properties"]["event_type"]["const"] == "flows/segments_missing"
     assert event["required"] == [
         "flow_id",
         "timerange",

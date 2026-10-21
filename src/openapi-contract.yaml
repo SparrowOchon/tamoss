@@ -4626,7 +4626,7 @@ webhooks:
       responses:
         '200':
           description: Webhook received successfully
-  flows/segments_requested:
+  flows/segments_missing:
     x-tamoss-extension: true
     post:
       security:
@@ -4635,7 +4635,7 @@ webhooks:
         content:
           application/json:
             schema:
-              title: Flow Segments Requested
+              title: Flow Segments Missing
               description: TAMOSS extension. Notification that a client listed Flow
                 Segments for a timerange that is not fully indexed, listing every
                 unindexed span.
@@ -4650,7 +4650,7 @@ webhooks:
                   format: date-time
                 event_type:
                   type: string
-                  const: flows/segments_requested
+                  const: flows/segments_missing
                 event:
                   type: object
                   required:
@@ -4674,8 +4674,7 @@ webhooks:
                         $ref: '#/components/schemas/Timerange'
                     truncated:
                       description: True when more than 10000 missing timeranges were
-                        found; missing_timeranges stops at the last span shown, so
-                        later spans in the request may also be missing
+                        found, so spans after the last listed one are unknown
                       type: boolean
       responses:
         '200':
@@ -5561,9 +5560,9 @@ components:
             - sources/created
             - sources/updated
             - sources/deleted
-            - flows/segments_requested
+            - flows/segments_missing
             x-tamoss-extension-events:
-            - flows/segments_requested
+            - flows/segments_missing
         flow_ids:
           description: Limit Flow and Flow Segment events to Flows in the given list
             of Flow IDs

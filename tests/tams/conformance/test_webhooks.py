@@ -94,33 +94,33 @@ def test_webhook_configuration_rejects_invalid_bbc_event_or_header(
 
 
 @pytest.mark.tamoss_extension
-def test_webhook_registration_accepts_segments_requested_extension_event(
+def test_webhook_registration_accepts_segments_missing_extension_event(
     client: TestClient,
 ) -> None:
     created = client.post(
         "/service/webhooks",
-        json=webhook_payload(events=["flows/segments_requested"]),
+        json=webhook_payload(events=["flows/segments_missing"]),
     )
     assert created.status_code == 201
-    assert created.json()["events"] == ["flows/segments_requested"]
+    assert created.json()["events"] == ["flows/segments_missing"]
     webhook_id = created.json()["id"]
 
     stored = client.get(f"/service/webhooks/{webhook_id}")
     assert stored.status_code == 200
-    assert stored.json()["events"] == ["flows/segments_requested"]
+    assert stored.json()["events"] == ["flows/segments_missing"]
 
     updated = client.put(
         f"/service/webhooks/{webhook_id}",
         json=webhook_payload(
             id=webhook_id,
             status="created",
-            events=["flows/segments_added", "flows/segments_requested"],
+            events=["flows/segments_added", "flows/segments_missing"],
         ),
     )
     assert updated.status_code == 201
     assert updated.json()["events"] == [
         "flows/segments_added",
-        "flows/segments_requested",
+        "flows/segments_missing",
     ]
 
 
@@ -130,7 +130,7 @@ def test_webhook_registration_still_rejects_unknown_events_beside_the_extension(
 ) -> None:
     rejected = client.post(
         "/service/webhooks",
-        json=webhook_payload(events=["flows/segments_requested", "flows/unknown"]),
+        json=webhook_payload(events=["flows/segments_missing", "flows/unknown"]),
     )
     assert rejected.status_code == 400
     assert rejected.json()["type"] == "bad_request"

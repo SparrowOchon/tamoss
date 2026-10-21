@@ -19,7 +19,7 @@ objects, and deletion workflows.
 | Storage selection | Presigned selection plus storage tag value and existence filters | [Storage Backends](../concepts/storage-backends.md) |
 | Service metadata | `/service` | BBC TAMS service identity and capabilities |
 | Storage backend catalogue | `/service/storage-backends` | Registered TAMS storage backend metadata |
-| Segment request events | `flows/segments_requested` webhook event | [TAMOSS Extension Events](#tamoss-extension-events) |
+| Missing segment events | `flows/segments_missing` webhook event | [TAMOSS Extension Events](#tamoss-extension-events) |
 
 The upstream OpenAPI document is authoritative for request and response fields.
 Capability pages explain TAMOSS persistence and lifecycle choices without
@@ -36,7 +36,7 @@ These endpoints are TAMOSS operational endpoints, not BBC TAMS resources:
 
 ## TAMOSS Extension Events
 
-`flows/segments_requested` is a TAMOSS webhook event outside the BBC TAMS event
+`flows/segments_missing` is a TAMOSS webhook event outside the BBC TAMS event
 set. The runtime `/openapi.json` lists it under `x-tamoss-extension-events` on
 the webhook `events` schema and documents its payload under `webhooks` with
 `x-tamoss-extension: true`. Registrations that list only BBC events never
@@ -50,9 +50,8 @@ never queue it because no Segment can be registered into them. Inclusive ends
 are normalised, so `[a_b]` also asks for the instant `b`. The `event` body
 carries `flow_id`, the requested `timerange`, `missing_timeranges` listing
 every unindexed span in order, `truncated`, which is `true` when more than
-10000 missing timeranges were found and the list stops at the last one shown,
-and `flow`, the requested Flow as stored, including its `tags` and
-`container_mapping`. The listing also queues the event when the Flow itself
+10000 spans were found and the list stops at the last one shown, and `flow`,
+the requested Flow as stored, including its `tags` and `container_mapping`. The listing also queues the event when the Flow itself
 does not exist: the response stays an empty listing, the whole requested
 timerange is reported missing, and `flow` is omitted, so a missing `flow`
 means the Flow is not in the store. Unknown Flows are only reported when the

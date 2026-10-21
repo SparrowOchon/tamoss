@@ -80,7 +80,7 @@ def test_webhook_worker_delivers_payload_and_clears_claim(
     assert delivered_payload["event"]["flow"]["id"] == str(flow_id)
 
 
-def test_webhook_worker_delivers_segments_requested_extension_event(
+def test_webhook_worker_delivers_segments_missing_extension_event(
     tamoss_app: FastAPI,
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -100,7 +100,7 @@ def test_webhook_worker_delivers_segments_requested_extension_event(
 
     monkeypatch.setattr(webhooking, "send_webhook_delivery", send_success)
     registration = _webhook_payload()
-    registration["events"] = ["flows/segments_requested"]
+    registration["events"] = ["flows/segments_missing"]
     assert client.post("/service/webhooks", json=registration).status_code == 201
     flow_id = uuid4()
     created = client.put(f"/flows/{flow_id}", json=video_flow_payload(flow_id, uuid4()))
@@ -112,7 +112,7 @@ def test_webhook_worker_delivers_segments_requested_extension_event(
 
     assert listed.status_code == 200
     delivery = only_delivery(use_cases)
-    assert delivery.event_type == "flows/segments_requested"
+    assert delivery.event_type == "flows/segments_missing"
     assert (
         worker.drain_webhook_deliveries(
             use_cases,

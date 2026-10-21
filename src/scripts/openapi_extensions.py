@@ -180,10 +180,10 @@ def _query_parameter_insert_index(parameters: list[Any], *, after_name: str) -> 
 
 
 def apply_tamoss_model_contract_extensions(spec: dict[str, Any]) -> None:
-    add_segments_requested_webhook_event(spec)
+    add_segments_missing_webhook_event(spec)
 
 
-def add_segments_requested_webhook_event(spec: dict[str, Any]) -> None:
+def add_segments_missing_webhook_event(spec: dict[str, Any]) -> None:
     schemas = spec.get("components", {}).get("schemas", {})
     webhook = schemas.get("Webhook")
     if not isinstance(webhook, dict):
@@ -195,14 +195,14 @@ def add_segments_requested_webhook_event(spec: dict[str, Any]) -> None:
     enum = items.get("enum")
     if not isinstance(enum, list):
         raise ValueError("Webhook events enum not found in the embedded contract")
-    if "flows/segments_requested" not in enum:
-        enum.append("flows/segments_requested")
-    items["x-tamoss-extension-events"] = ["flows/segments_requested"]
+    if "flows/segments_missing" not in enum:
+        enum.append("flows/segments_missing")
+    items["x-tamoss-extension-events"] = ["flows/segments_missing"]
     webhooks = spec.setdefault("webhooks", {})
-    webhooks.setdefault("flows/segments_requested", _segments_requested_webhook())
+    webhooks.setdefault("flows/segments_missing", _segments_missing_webhook())
 
 
-def _segments_requested_webhook() -> dict[str, Any]:
+def _segments_missing_webhook() -> dict[str, Any]:
     return {
         "x-tamoss-extension": True,
         "post": {
@@ -211,7 +211,7 @@ def _segments_requested_webhook() -> dict[str, Any]:
                 "content": {
                     "application/json": {
                         "schema": {
-                            "title": "Flow Segments Requested",
+                            "title": "Flow Segments Missing",
                             "description": (
                                 "TAMOSS extension. Notification that a client listed "
                                 "Flow Segments for a timerange that is not fully "
@@ -229,9 +229,9 @@ def _segments_requested_webhook() -> dict[str, Any]:
                                 },
                                 "event_type": {
                                     "type": "string",
-                                    "const": "flows/segments_requested",
+                                    "const": "flows/segments_missing",
                                 },
-                                "event": _segments_requested_event_schema(),
+                                "event": _segments_missing_event_schema(),
                             },
                         }
                     }
@@ -242,7 +242,7 @@ def _segments_requested_webhook() -> dict[str, Any]:
     }
 
 
-def _segments_requested_event_schema() -> dict[str, Any]:
+def _segments_missing_event_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "required": ["flow_id", "timerange", "missing_timeranges", "truncated"],
@@ -263,9 +263,8 @@ def _segments_requested_event_schema() -> dict[str, Any]:
             },
             "truncated": {
                 "description": (
-                    "True when more than 10000 missing timeranges were found; "
-                    "missing_timeranges stops at the last span shown, so later "
-                    "spans in the request may also be missing"
+                    "True when more than 10000 missing timeranges were found, "
+                    "so spans after the last listed one are unknown"
                 ),
                 "type": "boolean",
             },

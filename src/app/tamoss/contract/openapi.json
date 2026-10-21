@@ -5055,7 +5055,7 @@
         }
       }
     },
-    "flows/segments_requested": {
+    "flows/segments_missing": {
       "x-tamoss-extension": true,
       "post": {
         "security": [
@@ -5065,7 +5065,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "title": "Flow Segments Requested",
+                "title": "Flow Segments Missing",
                 "description": "TAMOSS extension. Notification that a client listed Flow Segments for a timerange that is not fully indexed, listing every unindexed span.",
                 "required": [
                   "event_timestamp",
@@ -5080,7 +5080,7 @@
                   },
                   "event_type": {
                     "type": "string",
-                    "const": "flows/segments_requested"
+                    "const": "flows/segments_missing"
                   },
                   "event": {
                     "type": "object",
@@ -5108,7 +5108,7 @@
                         }
                       },
                       "truncated": {
-                        "description": "True when more than 10000 missing timeranges were found; missing_timeranges stops at the last span shown, so later spans in the request may also be missing",
+                        "description": "True when more than 10000 missing timeranges were found, so spans after the last listed one are unknown",
                         "type": "boolean"
                       }
                     }
@@ -6090,10 +6090,10 @@
                 "sources/created",
                 "sources/updated",
                 "sources/deleted",
-                "flows/segments_requested"
+                "flows/segments_missing"
               ],
               "x-tamoss-extension-events": [
-                "flows/segments_requested"
+                "flows/segments_missing"
               ]
             }
           },

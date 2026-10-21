@@ -314,7 +314,7 @@ def test_bounded_listing_without_subscribers_adds_only_the_webhook_lookup() -> N
 def test_subscribed_covered_listing_runs_one_gap_query_and_publishes_nothing() -> None:
     repository = CountingRepository(_storage_backend())
     flow_id = _indexed_flow(repository, segment_count=3)
-    repository.save_webhook(_segment_request_webhook())
+    repository.save_webhook(_segments_missing_webhook())
     repository.reset_counts()
 
     with TestClient(
@@ -334,7 +334,7 @@ def test_subscribed_covered_listing_runs_one_gap_query_and_publishes_nothing() -
 def test_subscribed_uncovered_listing_runs_one_gap_query_and_publishes_once() -> None:
     repository = CountingRepository(_storage_backend())
     flow_id = _indexed_flow(repository, segment_count=3)
-    repository.save_webhook(_segment_request_webhook())
+    repository.save_webhook(_segments_missing_webhook())
     repository.reset_counts()
 
     with TestClient(
@@ -365,7 +365,7 @@ def test_unknown_flow_listing_with_subscriber_publishes_without_further_queries(
     None
 ):
     repository = CountingRepository(_storage_backend())
-    repository.save_webhook(_segment_request_webhook())
+    repository.save_webhook(_segments_missing_webhook())
     repository.reset_counts()
     flow_id = uuid4()
 
@@ -415,9 +415,9 @@ def test_unknown_flow_listing_without_subscribers_adds_only_the_webhook_lookup()
 def test_subscriber_scoped_to_another_flow_skips_the_gap_query_and_the_metric() -> None:
     repository = CountingRepository(_storage_backend())
     flow_id = _indexed_flow(repository, segment_count=3)
-    repository.save_webhook(_segment_request_webhook(flow_ids=[str(uuid4())]))
+    repository.save_webhook(_segments_missing_webhook(flow_ids=[str(uuid4())]))
     repository.reset_counts()
-    before = REGISTRY.get_sample_value("tamoss_segment_request_events_total") or 0.0
+    before = REGISTRY.get_sample_value("tamoss_segments_missing_events_total") or 0.0
 
     with TestClient(
         create_app(_settings(), use_cases=_use_cases(repository))
@@ -430,7 +430,7 @@ def test_subscriber_scoped_to_another_flow_skips_the_gap_query_and_the_metric() 
     assert repository.list_webhooks_calls == 1
     assert repository.list_segment_gaps_calls == 0
     assert repository.save_webhook_delivery_calls == 0
-    assert REGISTRY.get_sample_value("tamoss_segment_request_events_total") == before
+    assert REGISTRY.get_sample_value("tamoss_segments_missing_events_total") == before
 
 
 class CountingRepository:
@@ -715,12 +715,12 @@ def _storage_backend() -> StorageBackend:
     )
 
 
-def _segment_request_webhook(**selectors: list[str]) -> WebhookRecord:
+def _segments_missing_webhook(**selectors: list[str]) -> WebhookRecord:
     return WebhookRecord(
         id=uuid4(),
         data={
             "url": "https://indexer.example.test/segments",
-            "events": ["flows/segments_requested"],
+            "events": ["flows/segments_missing"],
             **selectors,
         },
         status="created",
