@@ -181,25 +181,42 @@ def _query_parameter_insert_index(parameters: list[Any], *, after_name: str) -> 
 
 def apply_tamoss_model_contract_extensions(spec: dict[str, Any]) -> None:
     add_segments_missing_webhook_event(spec)
+    add_flow_missing_webhook_event(spec)
 
 
 def add_segments_missing_webhook_event(spec: dict[str, Any]) -> None:
+    _add_extension_webhook_event(
+        spec, "flows/segments_missing", _segments_missing_webhook()
+    )
+
+
+def add_flow_missing_webhook_event(spec: dict[str, Any]) -> None:
+    _add_extension_webhook_event(spec, "flows/flow_missing", _flow_missing_webhook())
+
+
+def _add_extension_webhook_event(
+    spec: dict[str, Any],
+    event_name: str,
+    webhook: dict[str, Any],
+) -> None:
     schemas = spec.get("components", {}).get("schemas", {})
-    webhook = schemas.get("Webhook")
-    if not isinstance(webhook, dict):
+    webhook_schema = schemas.get("Webhook")
+    if not isinstance(webhook_schema, dict):
         return
-    events = webhook.get("properties", {}).get("events")
+    events = webhook_schema.get("properties", {}).get("events")
     items = events.get("items") if isinstance(events, dict) else None
     if not isinstance(items, dict):
         return
     enum = items.get("enum")
     if not isinstance(enum, list):
         raise ValueError("Webhook events enum not found in the embedded contract")
-    if "flows/segments_missing" not in enum:
-        enum.append("flows/segments_missing")
-    items["x-tamoss-extension-events"] = ["flows/segments_missing"]
+    if event_name not in enum:
+        enum.append(event_name)
+    extension_events = items.setdefault("x-tamoss-extension-events", [])
+    if event_name not in extension_events:
+        extension_events.append(event_name)
     webhooks = spec.setdefault("webhooks", {})
-    webhooks.setdefault("flows/segments_missing", _segments_missing_webhook())
+    webhooks.setdefault(event_name, webhook)
 
 
 def _segments_missing_webhook() -> dict[str, Any]:
@@ -238,6 +255,71 @@ def _segments_missing_webhook() -> dict[str, Any]:
                 }
             },
             "responses": {"200": {"description": "Webhook received successfully"}},
+        },
+    }
+
+
+def _flow_missing_webhook() -> dict[str, Any]:
+    return {
+        "x-tamoss-extension": True,
+        "post": {
+            "security": [{}],
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "title": "Flow Missing",
+                            "description": (
+                                "TAMOSS extension. Notification that a tag-filtered "
+                                "Flow listing matched no Flows, so the store holds "
+                                "no Flow carrying the requested tags."
+                            ),
+                            "required": ["event_timestamp", "event_type", "event"],
+                            "properties": {
+                                "event_timestamp": {
+                                    "description": (
+                                        "Timestamp at which the Flow listing was served"
+                                    ),
+                                    "type": "string",
+                                    "format": "date-time",
+                                },
+                                "event_type": {
+                                    "type": "string",
+                                    "const": "flows/flow_missing",
+                                },
+                                "event": _flow_missing_event_schema(),
+                            },
+                        }
+                    }
+                }
+            },
+            "responses": {"200": {"description": "Webhook received successfully"}},
+        },
+    }
+
+
+def _flow_missing_event_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["tags", "tag_exists"],
+        "properties": {
+            "tags": {
+                "description": (
+                    "The requested tag value filters by tag name. A Flow "
+                    "matches a filter when its tag carries any of the "
+                    "listed values."
+                ),
+                "type": "object",
+                "additionalProperties": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "tag_exists": {
+                "description": "The requested tag existence filters by tag name",
+                "type": "object",
+                "additionalProperties": {"type": "boolean"},
+            },
         },
     }
 

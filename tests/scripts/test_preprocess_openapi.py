@@ -138,7 +138,7 @@ def _embedded_webhook_spec() -> dict:
     }
 
 
-def test_model_contract_extensions_add_the_segments_missing_event_once() -> None:
+def test_model_contract_extensions_add_the_extension_events_once() -> None:
     module = _load_extensions_module()
     openapi = _embedded_webhook_spec()
 
@@ -150,9 +150,17 @@ def test_model_contract_extensions_add_the_segments_missing_event_once() -> None
         "flows/created",
         "flows/segments_added",
         "flows/segments_missing",
+        "flows/flow_missing",
     ]
-    assert items["x-tamoss-extension-events"] == ["flows/segments_missing"]
-    assert list(openapi["webhooks"]) == ["flows/created", "flows/segments_missing"]
+    assert items["x-tamoss-extension-events"] == [
+        "flows/segments_missing",
+        "flows/flow_missing",
+    ]
+    assert list(openapi["webhooks"]) == [
+        "flows/created",
+        "flows/segments_missing",
+        "flows/flow_missing",
+    ]
 
 
 def test_model_contract_extensions_document_the_segments_missing_webhook() -> None:
@@ -183,6 +191,32 @@ def test_model_contract_extensions_document_the_segments_missing_webhook() -> No
         "Webhook received successfully"
     )
     assert openapi["webhooks"]["flows/created"] == {"post": {}}
+
+
+def test_model_contract_extensions_document_the_flow_missing_webhook() -> None:
+    module = _load_extensions_module()
+    openapi = _embedded_webhook_spec()
+
+    module.apply_tamoss_model_contract_extensions(openapi)
+
+    entry = openapi["webhooks"]["flows/flow_missing"]
+    schema = entry["post"]["requestBody"]["content"]["application/json"]["schema"]
+    event = schema["properties"]["event"]
+    assert entry["x-tamoss-extension"] is True
+    assert entry["post"]["security"] == [{}]
+    assert schema["required"] == ["event_timestamp", "event_type", "event"]
+    assert schema["properties"]["event_type"]["const"] == "flows/flow_missing"
+    assert event["required"] == ["tags", "tag_exists"]
+    assert event["properties"]["tags"]["additionalProperties"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+    assert event["properties"]["tag_exists"]["additionalProperties"] == {
+        "type": "boolean"
+    }
+    assert entry["post"]["responses"]["200"]["description"] == (
+        "Webhook received successfully"
+    )
 
 
 def test_model_contract_extensions_fail_when_the_events_enum_is_missing() -> None:

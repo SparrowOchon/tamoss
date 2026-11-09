@@ -22,6 +22,10 @@ Release candidate for the second TAMOSS release implementing BBC TAMS 8.2.
   `container_mapping`, and a `GET` or `HEAD /flows/{flowId}/segments` listing
   for a Flow that does not exist queues it too, reporting the whole requested
   timerange as missing without the Flow embed.
+- Add the `flows/flow_missing` webhook extension event, queued when a Flow
+  listing filtered only by tags matches no Flows, so a client looking up a
+  multi-flow by a tag such as `tag.SOURCE.id` learns the store holds no such
+  Flow at all.
 
 Upgrades from `8.2.0-oss1` retain schema revision `8.2.0-oss1` and require no
 database migration. Deployments with an additional Nginx gateway must also apply

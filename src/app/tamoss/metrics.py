@@ -71,6 +71,10 @@ SEGMENTS_MISSING_EVENTS_TOTAL = Counter(
     "tamoss_segments_missing_events_total",
     "Flow Segment listings over unindexed timeranges that queued a webhook event.",
 )
+FLOW_MISSING_EVENTS_TOTAL = Counter(
+    "tamoss_flow_missing_events_total",
+    "Tag-filtered Flow listings that matched no Flows and queued a webhook event.",
+)
 
 
 def record_segments_ingested(count: int) -> None:
@@ -93,6 +97,10 @@ def record_presigned_url(operation: str) -> None:
 
 def record_segments_missing_event() -> None:
     SEGMENTS_MISSING_EVENTS_TOTAL.inc()
+
+
+def record_flow_missing_event() -> None:
+    FLOW_MISSING_EVENTS_TOTAL.inc()
 
 
 # Worker media-load metrics: the background worker is a separate process that

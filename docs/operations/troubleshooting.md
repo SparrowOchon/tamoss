@@ -142,6 +142,12 @@ default), so a missing success timestamp does not prove delivery never worked.
   contains the id and whose `source_ids` and collected-by selectors are
   omitted or empty lists, because a non-empty selector cannot match an
   unknown Flow.
+- No `flows/flow_missing` event: confirm the registration lists it with its
+  `flow_ids` and `source_ids` selectors omitted and its collected-by selectors
+  omitted or empty lists, and that the listing used only `tag.{name}` or
+  `tag_exists.{name}` filters on its first page and matched no Flows. Any
+  other filter suppresses the event because an empty narrowed listing does not
+  prove the tags are absent from the store.
 - Pending or expired claim: inspect worker readiness, queue age and leases.
 - HTTP 401/403: compare callback authentication with the receiver's expected key.
 - Target blocked: inspect DNS and egress policy. Delivery pins the checked

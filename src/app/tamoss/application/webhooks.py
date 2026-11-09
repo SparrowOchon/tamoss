@@ -58,6 +58,7 @@ VALID_WEBHOOK_EVENTS = {
     "flows/created",
     "flows/updated",
     "flows/deleted",
+    "flows/flow_missing",
     "flows/segments_added",
     "flows/segments_deleted",
     "flows/segments_missing",
@@ -357,6 +358,21 @@ def webhooks_for_missing_flow(
     ]
 
 
+def webhooks_for_flow_missing(webhooks: list[WebhookRecord]) -> list[WebhookRecord]:
+    return [
+        webhook
+        for webhook in webhooks
+        if webhook_matches(
+            webhook.data,
+            event_type="flows/flow_missing",
+            flow_ids=[],
+            source_ids=[],
+            flow_collected_by_ids=[],
+            source_collected_by_ids=[],
+        )
+    ]
+
+
 def publishable_flow_id(flow_id: UUID) -> bool:
     return flow_id.version in {1, 2, 3, 4, 5}
 
@@ -567,6 +583,29 @@ def publish_unknown_flow_segments_missing(
         source_collected_by_ids=[],
         webhooks=webhooks,
         flow_ids=[str(flow_id)],
+    )
+
+
+def publish_flow_missing(
+    *,
+    repository: WebhookEventRepository,
+    tag_values: dict[str, set[str]],
+    tag_exists: dict[str, bool],
+    webhooks: list[WebhookRecord],
+) -> list[WebhookDeliveryRecord]:
+    event: JsonPayload = {
+        "tags": {name: sorted(values) for name, values in sorted(tag_values.items())},
+        "tag_exists": {name: tag_exists[name] for name in sorted(tag_exists)},
+    }
+    return publish_webhook_event(
+        repository=repository,
+        event_type="flows/flow_missing",
+        event_factory=lambda _webhook: event,
+        flow=None,
+        source=None,
+        flow_collected_by_ids=[],
+        source_collected_by_ids=[],
+        webhooks=webhooks,
     )
 
 

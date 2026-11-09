@@ -5124,6 +5124,71 @@
           }
         }
       }
+    },
+    "flows/flow_missing": {
+      "x-tamoss-extension": true,
+      "post": {
+        "security": [
+          {}
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Flow Missing",
+                "description": "TAMOSS extension. Notification that a tag-filtered Flow listing matched no Flows, so the store holds no Flow carrying the requested tags.",
+                "required": [
+                  "event_timestamp",
+                  "event_type",
+                  "event"
+                ],
+                "properties": {
+                  "event_timestamp": {
+                    "description": "Timestamp at which the Flow listing was served",
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "event_type": {
+                    "type": "string",
+                    "const": "flows/flow_missing"
+                  },
+                  "event": {
+                    "type": "object",
+                    "required": [
+                      "tags",
+                      "tag_exists"
+                    ],
+                    "properties": {
+                      "tags": {
+                        "description": "The requested tag value filters by tag name. A Flow matches a filter when its tag carries any of the listed values.",
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "tag_exists": {
+                        "description": "The requested tag existence filters by tag name",
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook received successfully"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6090,10 +6155,12 @@
                 "sources/created",
                 "sources/updated",
                 "sources/deleted",
-                "flows/segments_missing"
+                "flows/segments_missing",
+                "flows/flow_missing"
               ],
               "x-tamoss-extension-events": [
-                "flows/segments_missing"
+                "flows/segments_missing",
+                "flows/flow_missing"
               ]
             }
           },

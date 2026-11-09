@@ -926,6 +926,252 @@ def test_unknown_flow_listing_with_invalid_page_logs_no_error(
     assert _segments_missing_events(tamoss_app) == []
 
 
+@pytest.mark.tamoss_extension
+def test_tag_filtered_listing_matching_no_flows_queues_a_flow_missing_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+    create_video_flow(client, tags={"SOURCE.id": "another-mob"})
+
+    listed = client.get("/flows", params={"tag.SOURCE.id": "mob-123"})
+
+    assert listed.status_code == 200
+    assert listed.json() == []
+    assert _flow_missing_events(tamoss_app) == [
+        {"tags": {"SOURCE.id": ["mob-123"]}, "tag_exists": {}}
+    ]
+
+
+@pytest.mark.tamoss_extension
+def test_flow_missing_head_listing_queues_the_event_like_get(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+
+    probed = client.head("/flows", params={"tag.SOURCE.id": "mob-123"})
+
+    assert probed.status_code == 200
+    assert probed.content == b""
+    assert _flow_missing_events(tamoss_app) == [
+        {"tags": {"SOURCE.id": ["mob-123"]}, "tag_exists": {}}
+    ]
+
+
+@pytest.mark.tamoss_extension
+def test_tag_filtered_listing_with_a_match_queues_no_flow_missing_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+    create_video_flow(client, tags={"SOURCE.id": "mob-123"})
+
+    listed = client.get("/flows", params={"tag.SOURCE.id": "mob-123"})
+
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    assert _flow_missing_events(tamoss_app) == []
+
+
+@pytest.mark.tamoss_extension
+def test_tag_existence_filtered_listing_queues_the_flow_missing_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+    create_video_flow(client)
+
+    listed = client.get("/flows", params={"tag_exists.orphan": "true"})
+
+    assert listed.status_code == 200
+    assert listed.json() == []
+    assert _flow_missing_events(tamoss_app) == [
+        {"tags": {}, "tag_exists": {"orphan": True}}
+    ]
+
+
+@pytest.mark.tamoss_extension
+def test_flow_missing_event_sorts_tag_names_and_values(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+
+    listed = client.get(
+        "/flows",
+        params={"tag.SOURCE.id": "mob-b,mob-a", "tag.quality": "hd"},
+    )
+
+    assert listed.status_code == 200
+    assert _flow_missing_events(tamoss_app) == [
+        {
+            "tags": {"SOURCE.id": ["mob-a", "mob-b"], "quality": ["hd"]},
+            "tag_exists": {},
+        }
+    ]
+
+
+@pytest.mark.tamoss_extension
+def test_non_tag_and_narrowed_tag_listings_queue_no_flow_missing_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+
+    for params in (
+        {},
+        {"source_id": str(uuid4())},
+        {"tag.SOURCE.id": "mob-123", "source_id": str(uuid4())},
+        {"tag.SOURCE.id": "mob-123", "timerange": "[0:0_40:0)"},
+        {"tag.SOURCE.id": "mob-123", "format": "urn:x-nmos:format:video"},
+        {"tag.SOURCE.id": "mob-123", "codec": "video/h264"},
+        {"tag.SOURCE.id": "mob-123", "profile_id": str(uuid4())},
+        {"tag.SOURCE.id": "mob-123", "status": "ingesting"},
+        {"tag.SOURCE.id": "mob-123", "label": "proxy"},
+        {"tag.SOURCE.id": "mob-123", "frame_width": "1920"},
+        {"tag.SOURCE.id": "mob-123", "frame_height": "1080"},
+        {"tag.SOURCE.id": "mob-123", "init_segments": "true"},
+        {"tag.SOURCE.id": "mob-123", "collected_by_ids": str(uuid4())},
+        {"tag.SOURCE.id": "mob-123", "collected_by_ids": ""},
+        {"tag.SOURCE.id": "mob-123", "page": "1"},
+    ):
+        listed = client.get("/flows", params=params)
+        assert listed.status_code == 200, params
+        assert _flow_missing_events(tamoss_app) == [], params
+
+
+@pytest.mark.tamoss_extension
+def test_flow_missing_fires_with_sort_and_limit_options_on_the_first_page(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+
+    listed = client.get(
+        "/flows",
+        params={
+            "tag.SOURCE.id": "mob-123",
+            "limit": "10",
+            "sort_by": "label",
+            "reverse_order": "true",
+        },
+    )
+
+    assert listed.status_code == 200
+    assert len(_flow_missing_events(tamoss_app)) == 1
+
+
+@pytest.mark.tamoss_extension
+def test_every_unmatched_tag_listing_queues_its_own_flow_missing_event(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    _subscribe_to_flow_missing(client)
+    before = REGISTRY.get_sample_value("tamoss_flow_missing_events_total") or 0.0
+
+    for _ in range(2):
+        listed = client.get("/flows", params={"tag.SOURCE.id": "mob-123"})
+        assert listed.status_code == 200
+
+    assert len(_flow_missing_events(tamoss_app)) == 2
+    assert REGISTRY.get_sample_value("tamoss_flow_missing_events_total") == (before + 2)
+
+
+@pytest.mark.tamoss_extension
+def test_flow_missing_selectors_match_only_unscoped_registrations(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    unscoped = _subscribe_to_flow_missing(
+        client, url="https://unscoped.example.test/webhook"
+    )
+    empty_collected = _subscribe_to_flow_missing(
+        client,
+        url="https://empty-collected.example.test/webhook",
+        flow_collected_by_ids=[],
+        source_collected_by_ids=[],
+    )
+    _subscribe_to_flow_missing(
+        client, url="https://flow.example.test/webhook", flow_ids=[str(uuid4())]
+    )
+    _subscribe_to_flow_missing(
+        client, url="https://source.example.test/webhook", source_ids=[str(uuid4())]
+    )
+    _subscribe_to_flow_missing(
+        client,
+        url="https://collected.example.test/webhook",
+        flow_collected_by_ids=[str(uuid4())],
+    )
+
+    listed = client.get("/flows", params={"tag.SOURCE.id": "mob-123"})
+
+    assert listed.status_code == 200
+    deliveries = _flow_missing_deliveries(tamoss_app)
+    assert {delivery.webhook_id for delivery in deliveries} == {
+        unscoped,
+        empty_collected,
+    }
+
+
+@pytest.mark.tamoss_extension
+def test_unmatched_tag_listing_without_a_subscriber_queues_nothing(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/service/webhooks", json=webhook_payload(events=["flows/segments_missing"])
+    )
+    assert created.status_code == 201
+    repository = tamoss_app.state.tamoss_use_cases.repository
+    deliveries_before = len(repository.list_webhook_deliveries())
+
+    listed = client.get("/flows", params={"tag.SOURCE.id": "mob-123"})
+
+    assert listed.status_code == 200
+    assert len(repository.list_webhook_deliveries()) == deliveries_before
+
+
+@pytest.mark.tamoss_extension
+def test_flow_listing_succeeds_when_publishing_the_flow_missing_event_raises(
+    tamoss_app: FastAPI,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode(**_kwargs: object) -> list[object]:
+        raise RuntimeError("outbox unavailable")
+
+    monkeypatch.setattr(webhooking, "publish_flow_missing", explode)
+    _subscribe_to_flow_missing(client)
+
+    listed = client.get("/flows", params={"tag.SOURCE.id": "mob-123"})
+
+    assert listed.status_code == 200
+    assert listed.json() == []
+    assert _flow_missing_events(tamoss_app) == []
+
+
+@pytest.mark.tamoss_extension
+def test_flow_missing_event_uses_the_shared_envelope_and_starts_the_webhook(
+    tamoss_app: FastAPI,
+    client: TestClient,
+) -> None:
+    webhook_id = _subscribe_to_flow_missing(
+        client, api_key_name="x-api-key", api_key_value="secret-value"
+    )
+
+    listed = client.get("/flows", params={"tag.SOURCE.id": "mob-123"})
+
+    assert listed.status_code == 200
+    (delivery,) = _flow_missing_deliveries(tamoss_app)
+    assert set(delivery.payload) == {"event_timestamp", "event_type", "event"}
+    assert delivery.payload["event_type"] == "flows/flow_missing"
+    assert delivery.status == "pending"
+    assert delivery.webhook_snapshot["api_key_value_ref"] == "webhook.api_key_value"
+    assert "api_key_value" not in delivery.webhook_snapshot
+    assert client.get(f"/service/webhooks/{webhook_id}").json()["status"] == "started"
+
+
 def _register_collection_selector_webhooks(
     client: TestClient,
     *,
@@ -1025,4 +1271,28 @@ def _segments_missing_events(tamoss_app: FastAPI) -> list[dict[str, object]]:
     return [
         delivery.payload["event"]
         for delivery in _segments_missing_deliveries(tamoss_app)
+    ]
+
+
+def _subscribe_to_flow_missing(client: TestClient, **overrides: object) -> UUID:
+    created = client.post(
+        "/service/webhooks",
+        json=webhook_payload(events=["flows/flow_missing"], **overrides),
+    )
+    assert created.status_code == 201
+    return UUID(created.json()["id"])
+
+
+def _flow_missing_deliveries(tamoss_app: FastAPI) -> list[WebhookDeliveryRecord]:
+    deliveries = tamoss_app.state.tamoss_use_cases.repository.list_webhook_deliveries()
+    return [
+        delivery
+        for delivery in deliveries
+        if delivery.event_type == "flows/flow_missing"
+    ]
+
+
+def _flow_missing_events(tamoss_app: FastAPI) -> list[dict[str, object]]:
+    return [
+        delivery.payload["event"] for delivery in _flow_missing_deliveries(tamoss_app)
     ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from uuid import UUID, uuid4
 from mediatimestamp import TimeRange
 from pydantic import BaseModel, ValidationError
 
+from tamoss import metrics
 from tamoss.application import webhooks as webhooking
 from tamoss.auth import Identity
 from tamoss.contract.generated import contract_models
@@ -28,7 +30,7 @@ from tamoss.domain.flow_collections import (
 )
 from tamoss.domain.listings import FlowSortBy
 from tamoss.domain.model import FlowRecord, MediaObjectRecord, SourceRecord, utc_now
-from tamoss.domain.pagination import Page
+from tamoss.domain.pagination import Page, resolve_page_window
 from tamoss.domain.tags import TagValue, valid_tag_value
 from tamoss.domain.timeranges import normalized_timerange_bounds
 from tamoss.errors import BadRequest, Forbidden, NotFound
@@ -39,6 +41,8 @@ from tamoss.ports.repositories import (
     ProfileRepository,
     WebhookEventRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 FlowPropertyName = Literal[
     "label",
@@ -334,7 +338,7 @@ class FlowUseCases:
         except ValueError as exc:
             raise BadRequest("Bad request. Invalid query options.") from exc
         requested_timerange = query_timerange(timerange)
-        return self.repository.list_flows_page(
+        flow_page = self.repository.list_flows_page(
             source_id=source_id,
             timerange_start=requested_timerange.start,
             timerange_end=requested_timerange.end,
@@ -357,6 +361,51 @@ class FlowUseCases:
             page=page,
             limit=limit,
         )
+        if (
+            not flow_page.items
+            and (tag_values or tag_exists)
+            and source_id is None
+            and requested_timerange == QueryTimerange()
+            and format is None
+            and profile_id is None
+            and status is None
+            and init_segments is None
+            and collected_by_ids is None
+            and not top_level_only
+            and codec is None
+            and label is None
+            and frame_width is None
+            and frame_height is None
+            and resolve_page_window(page=page, limit=limit).offset == 0
+        ):
+            self._report_flow_missing(tag_values=tag_values, tag_exists=tag_exists)
+        return flow_page
+
+    def _report_flow_missing(
+        self,
+        *,
+        tag_values: dict[str, set[str]],
+        tag_exists: dict[str, bool],
+    ) -> None:
+        try:
+            webhooks = webhooking.webhooks_for_flow_missing(
+                webhooking.active_webhooks_for_event(
+                    self.webhook_repository, "flows/flow_missing"
+                )
+            )
+            if not webhooks:
+                return
+            with self.repository.unit_of_work():
+                deliveries = webhooking.publish_flow_missing(
+                    repository=self.webhook_repository,
+                    tag_values=tag_values,
+                    tag_exists=tag_exists,
+                    webhooks=webhooks,
+                )
+            if deliveries:
+                metrics.record_flow_missing_event()
+        except Exception:
+            logger.exception("flow_missing event skipped")
 
     def flow_timerange(self, flow_id: UUID, timerange: str | None = None) -> str:
         flow = self.get_flow(flow_id)

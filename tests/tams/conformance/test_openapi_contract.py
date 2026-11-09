@@ -115,7 +115,10 @@ def test_runtime_openapi_marks_segments_missing_webhook_event_as_extension(
         "application/json"
     ]["schema"]
 
-    assert events["x-tamoss-extension-events"] == ["flows/segments_missing"]
+    assert events["x-tamoss-extension-events"] == [
+        "flows/segments_missing",
+        "flows/flow_missing",
+    ]
     assert "flows/segments_missing" in events["enum"]
     assert [
         event
@@ -138,7 +141,31 @@ def test_runtime_openapi_marks_segments_missing_webhook_event_as_extension(
     ]
     assert [
         name for name, entry in webhooks.items() if "x-tamoss-extension" in entry
-    ] == ["flows/segments_missing"]
+    ] == ["flows/segments_missing", "flows/flow_missing"]
+
+
+@pytest.mark.tamoss_extension
+def test_runtime_openapi_marks_flow_missing_webhook_event_as_extension(
+    tamoss_app: FastAPI,
+) -> None:
+    schema = tamoss_app.openapi()
+    events = schema["components"]["schemas"]["Webhook"]["properties"]["events"]["items"]
+    webhooks = schema["webhooks"]
+    event_schema = webhooks["flows/flow_missing"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+
+    assert "flows/flow_missing" in events["enum"]
+    assert "flows/flow_missing" in events["x-tamoss-extension-events"]
+    assert webhooks["flows/flow_missing"]["x-tamoss-extension"] is True
+    assert event_schema["properties"]["event_type"]["const"] == "flows/flow_missing"
+    assert event_schema["properties"]["event"]["required"] == ["tags", "tag_exists"]
+    assert event_schema["properties"]["event"]["properties"]["tags"][
+        "additionalProperties"
+    ] == {"type": "array", "items": {"type": "string"}}
+    assert event_schema["properties"]["event"]["properties"]["tag_exists"][
+        "additionalProperties"
+    ] == {"type": "boolean"}
 
 
 def test_runtime_openapi_uses_bbc_error_response_codes(tamoss_app: FastAPI) -> None:

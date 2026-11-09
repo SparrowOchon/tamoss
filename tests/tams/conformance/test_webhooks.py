@@ -125,6 +125,37 @@ def test_webhook_registration_accepts_segments_missing_extension_event(
 
 
 @pytest.mark.tamoss_extension
+def test_webhook_registration_accepts_flow_missing_extension_event(
+    client: TestClient,
+) -> None:
+    created = client.post(
+        "/service/webhooks",
+        json=webhook_payload(events=["flows/flow_missing"]),
+    )
+    assert created.status_code == 201
+    assert created.json()["events"] == ["flows/flow_missing"]
+    webhook_id = created.json()["id"]
+
+    stored = client.get(f"/service/webhooks/{webhook_id}")
+    assert stored.status_code == 200
+    assert stored.json()["events"] == ["flows/flow_missing"]
+
+    updated = client.put(
+        f"/service/webhooks/{webhook_id}",
+        json=webhook_payload(
+            id=webhook_id,
+            status="created",
+            events=["flows/flow_missing", "flows/segments_missing"],
+        ),
+    )
+    assert updated.status_code == 201
+    assert updated.json()["events"] == [
+        "flows/flow_missing",
+        "flows/segments_missing",
+    ]
+
+
+@pytest.mark.tamoss_extension
 def test_webhook_registration_still_rejects_unknown_events_beside_the_extension(
     client: TestClient,
 ) -> None:
