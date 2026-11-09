@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from mediatimestamp import TimeRange, Timestamp
@@ -55,11 +56,13 @@ def finite_normalized_timerange_bounds(
     return bounds
 
 
-def timerange_from_bounds(start: int | None, end: int | None) -> str:
+def timerange_from_bounds(
+    start: int | Decimal | None, end: int | Decimal | None
+) -> str:
     if start is None or end is None:
         return "()"
-    start_ts = Timestamp.from_nanosec(start)
-    end_ts = Timestamp.from_nanosec(end)
+    start_ts = Timestamp.from_nanosec(int(start))
+    end_ts = Timestamp.from_nanosec(int(end))
     if start == end:
         return f"[{start_ts}]"
     return f"[{start_ts}_{end_ts})"
@@ -70,6 +73,8 @@ def parse_timerange(
 ) -> TimeRange:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field_name} must be a timerange string")
+    if "_" not in value and value != "()" and ("(" in value or ")" in value):
+        raise ValueError(f"{field_name} instantaneous ranges cannot be exclusive")
     try:
         parsed = TimeRange.from_str(value)
     except Exception as exc:
@@ -93,10 +98,7 @@ def timerange_union_strings(timeranges: Iterable[str | None]) -> str | None:
     for timerange_value in timeranges:
         if timerange_value is None:
             continue
-        try:
-            parsed = TimeRange.from_str(timerange_value)
-        except Exception as exc:
-            raise ValueError("timerange is invalid") from exc
+        parsed = parse_timerange(timerange_value)
         if not parsed.is_empty():
             ranges.append(parsed)
     if not ranges:

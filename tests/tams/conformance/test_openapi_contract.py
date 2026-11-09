@@ -5,14 +5,16 @@ from types import ModuleType
 
 import pytest
 from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
 
+from tests.support.bbc_contract import bbc_spec
 from tests.support.paths import load_python_module
 from tests.tams.support import BBC_API_SPEC_PATH, BBC_WEBHOOK_SCHEMA_PATH, REPO_ROOT
 
 pytestmark = [pytest.mark.tams_conformance, pytest.mark.tams_contract]
 
 
-def test_runtime_openapi_has_bbc_operation_parity(tamoss_app: FastAPI) -> None:
+def test_published_openapi_has_bbc_document_alignment(tamoss_app: FastAPI) -> None:
     """bbc-id: semantic.spec.version_alignment"""
     parity = _load_openapi_parity_module()
     report = parity.compare_specs(
@@ -25,7 +27,30 @@ def test_runtime_openapi_has_bbc_operation_parity(tamoss_app: FastAPI) -> None:
     )
 
 
-def test_runtime_openapi_keeps_bbc_delete_request_path_shape(
+def _assert_bbc_routes_registered(app: FastAPI) -> None:
+    runtime = get_openapi(title="Registered routes", version="test", routes=app.routes)
+    # Python parameter names can differ from BBC placeholders such as request-id.
+    parity = _load_openapi_parity_module()
+    expected = set(parity.operation_map(bbc_spec()))
+    actual = set(parity.operation_map(runtime))
+    assert not expected - actual, f"Missing BBC routes: {sorted(expected - actual)}"
+
+
+def test_bbc_operations_are_registered_in_fastapi(tamoss_app: FastAPI) -> None:
+    _assert_bbc_routes_registered(tamoss_app)
+
+
+def test_route_check_detects_missing_handlers_despite_published_document(
+    tamoss_app: FastAPI,
+) -> None:
+    published = tamoss_app.openapi()
+    tamoss_app.router.routes.clear()
+    assert tamoss_app.openapi() == published
+    with pytest.raises(AssertionError, match="Missing BBC routes"):
+        _assert_bbc_routes_registered(tamoss_app)
+
+
+def test_published_openapi_keeps_bbc_delete_request_path_shape(
     tamoss_app: FastAPI,
 ) -> None:
     """bbc-id: semantic.runtime.flow_delete_requests_routed"""
@@ -44,7 +69,7 @@ def test_runtime_openapi_keeps_bbc_delete_request_path_shape(
     )
 
 
-def test_runtime_openapi_hides_tamoss_object_mutation_aliases(
+def test_published_openapi_hides_tamoss_object_mutation_aliases(
     tamoss_app: FastAPI,
 ) -> None:
     schema = tamoss_app.openapi()
@@ -55,7 +80,7 @@ def test_runtime_openapi_hides_tamoss_object_mutation_aliases(
     assert "delete" in schema["paths"]["/objects/{objectId}/instances"]
 
 
-def test_runtime_openapi_documents_tag_filter_and_path_shapes(
+def test_published_openapi_documents_tag_filter_and_path_shapes(
     tamoss_app: FastAPI,
 ) -> None:
     schema = tamoss_app.openapi()
@@ -77,7 +102,7 @@ def test_runtime_openapi_documents_tag_filter_and_path_shapes(
 
 
 @pytest.mark.tamoss_extension
-def test_runtime_openapi_distinguishes_core_and_compatibility_timerange_parameters(
+def test_published_openapi_distinguishes_core_and_compatibility_timerange_parameters(
     tamoss_app: FastAPI,
 ) -> None:
     schema = tamoss_app.openapi()
@@ -102,7 +127,7 @@ def test_runtime_openapi_distinguishes_core_and_compatibility_timerange_paramete
 
 
 @pytest.mark.tamoss_extension
-def test_runtime_openapi_marks_segments_missing_webhook_event_as_extension(
+def test_published_openapi_marks_segments_missing_webhook_event_as_extension(
     tamoss_app: FastAPI,
 ) -> None:
     schema = tamoss_app.openapi()
@@ -145,7 +170,7 @@ def test_runtime_openapi_marks_segments_missing_webhook_event_as_extension(
 
 
 @pytest.mark.tamoss_extension
-def test_runtime_openapi_marks_flow_missing_webhook_event_as_extension(
+def test_published_openapi_marks_flow_missing_webhook_event_as_extension(
     tamoss_app: FastAPI,
 ) -> None:
     schema = tamoss_app.openapi()
@@ -168,7 +193,7 @@ def test_runtime_openapi_marks_flow_missing_webhook_event_as_extension(
     ] == {"type": "boolean"}
 
 
-def test_runtime_openapi_uses_bbc_error_response_codes(tamoss_app: FastAPI) -> None:
+def test_published_openapi_uses_bbc_error_response_codes(tamoss_app: FastAPI) -> None:
     schema = tamoss_app.openapi()
 
     for path_item in schema["paths"].values():
@@ -185,7 +210,7 @@ def test_runtime_openapi_uses_bbc_error_response_codes(tamoss_app: FastAPI) -> N
 
 
 @pytest.mark.tamoss_extension
-def test_runtime_openapi_documents_tamoss_error_payload(tamoss_app: FastAPI) -> None:
+def test_published_openapi_documents_tamoss_error_payload(tamoss_app: FastAPI) -> None:
     schema = tamoss_app.openapi()
 
     assert "ErrorPayload" in schema["components"]["schemas"]
@@ -196,7 +221,7 @@ def test_runtime_openapi_documents_tamoss_error_payload(tamoss_app: FastAPI) -> 
 
 
 @pytest.mark.tamoss_extension
-def test_runtime_openapi_distinguishes_tamoss_and_tams_versions(
+def test_published_openapi_distinguishes_tamoss_and_tams_versions(
     tamoss_app: FastAPI,
 ) -> None:
     schema = tamoss_app.openapi()

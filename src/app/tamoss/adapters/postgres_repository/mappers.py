@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from mediatimestamp import TimeRange
 from psycopg.types.json import Jsonb
 
 from tamoss.adapters.postgres_repository.types import (
@@ -32,7 +31,7 @@ from tamoss.domain.model import (
     WebhookDeliveryRecord,
     WebhookRecord,
 )
-from tamoss.domain.timeranges import finite_normalized_timerange_bounds
+from tamoss.domain.timeranges import finite_normalized_timerange_bounds, parse_timerange
 from tamoss.errors import normalize_error_payload
 
 
@@ -478,8 +477,8 @@ def _raise_if_segments_overlap(
           AND EXISTS (
               SELECT 1
               FROM unnest(
-                  %(starts)s::bigint[],
-                  %(ends)s::bigint[]
+                  %(starts)s::numeric[],
+                  %(ends)s::numeric[]
               ) AS candidate(timerange_start, timerange_end)
               WHERE segment.timerange_start < candidate.timerange_end
                 AND segment.timerange_end > candidate.timerange_start
@@ -852,7 +851,7 @@ def _optional_datetime_from_record(value: Any) -> datetime | None:
 
 def _timerange_bounds(timerange: str) -> tuple[int, int]:
     try:
-        parsed = TimeRange.from_str(timerange)
+        parsed = parse_timerange(timerange)
     except Exception as exc:
         raise ValueError("Segment timerange is invalid.") from exc
     try:
